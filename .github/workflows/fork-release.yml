@@ -52,16 +52,16 @@ jobs:
       main_sha: ${{ steps.intent.outputs.main_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          submodules: false
-          # .repos reference gitlinks have no .gitmodules entries; upstream CI excludes them too.
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git init --initial-branch=main .
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --no-tags --prune --no-recurse-submodules origin "+refs/heads/*:refs/remotes/origin/*"
+          git checkout --force -B main refs/remotes/origin/main
+          git log -1 --format=%H
 
       - name: Resolve release intent
         id: intent

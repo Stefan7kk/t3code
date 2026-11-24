@@ -1,7 +1,9 @@
 name: Fork checkout and upstream merge
 description: >
   Checks out the pinned fork main commit and, when an upstream stable tag is given, merges it.
-  A merge conflict fails the job so nothing downstream can build or publish.
+  A merge conflict fails the job so nothing downstream can build or publish. Uses plain git
+  instead of actions/checkout: upstream's .repos reference gitlinks have no .gitmodules entries
+  and break the checkout action's unconditional `git submodule foreach` auth cleanup.
 inputs:
   main-sha:
     description: Fork main commit the release was planned against.
@@ -22,17 +24,17 @@ runs:
   using: composite
   steps:
     - name: Checkout fork main
-      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      with:
-        ref: ${{ inputs.main-sha }}
-        fetch-depth: 0
-        persist-credentials: ${{ inputs.push-merged == 'true' }}
-        submodules: false
-        # .repos reference gitlinks have no .gitmodules entries; upstream CI excludes them too.
-        sparse-checkout: |
-          /*
-          !/.repos/
-        sparse-checkout-cone-mode: false
+      shell: bash
+      env:
+        MAIN_SHA: ${{ inputs.main-sha }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        git init --initial-branch=main .
+        git remote add origin "https://github.com/${REPO}.git"
+        git fetch --no-tags --prune --no-recurse-submodules origin "+refs/heads/*:refs/remotes/origin/*"
+        git checkout --force "$MAIN_SHA"
+        git log -1 --format=%H
 
     - name: Merge upstream stable
       if: inputs.upstream-tag != ''
@@ -41,6 +43,8 @@ runs:
         UPSTREAM_TAG: ${{ inputs.upstream-tag }}
         UPSTREAM_REPO: ${{ inputs.upstream-repo }}
         PUSH_MERGED: ${{ inputs.push-merged }}
+        REPO: ${{ github.repository }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -54,5 +58,5 @@ runs:
         git merge --no-ff "upstream/${UPSTREAM_TAG}" \
           -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
         if [[ "$PUSH_MERGED" == "true" ]]; then
-          git push origin "HEAD:refs/heads/main"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" HEAD:refs/heads/main
         fi
