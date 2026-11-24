@@ -2,6 +2,7 @@ import {
   ProviderDriverKind,
   ProviderSetupError,
   type ServerProviderModel,
+  type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
 import { CursorSettings } from "../settings.ts";
 import type { SDKModel } from "@cursor/sdk";
@@ -12,6 +13,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import { cursorRateModel } from "./accountUsage.ts";
+import { withCursorAdaptiveChoices } from "./cursorAdaptiveRouting.ts";
 import { readCursorUsageLimits } from "./usageLimits.ts";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
@@ -166,11 +168,13 @@ export const CursorDriver: ProviderDriver<
 
     let catalogModels: ReadonlyArray<ServerProviderModel> = [];
     let catalogSdkModels: ReadonlyArray<SDKModel> = [];
+    let latestUsageLimits: ServerProviderUsageLimits | undefined;
     const orchestrationAdapter = yield* makeCursorAdapterV2({
       instanceId,
       environment: processEnv,
       getModels: () => catalogModels,
       getSdkModels: () => catalogSdkModels,
+      getUsageLimits: () => latestUsageLimits,
     }).pipe(
       Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
         ...sdkRunner,
@@ -252,8 +256,14 @@ export const CursorDriver: ProviderDriver<
           if (provider.models.some((model) => !model.isCustom)) {
             catalogModels = provider.models;
           }
+          latestUsageLimits = provider.usageLimits;
         }),
       ),
+      // The catalog keeps the raw models; only the published list carries the Auto choices.
+      Effect.map((provider) => ({
+        ...provider,
+        models: withCursorAdaptiveChoices(provider.models),
+      })),
       Effect.provideServiceEffect(
         CursorSdkCatalog.CursorSdkCatalog,
         Effect.map(CursorSdkCatalog.CursorSdkCatalog, (catalog) =>

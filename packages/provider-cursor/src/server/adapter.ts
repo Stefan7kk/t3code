@@ -30,8 +30,10 @@ import {
   type ProviderInstanceId,
   type ServerProviderModel,
   type ServerProviderSkill,
+  type ServerProviderUsageLimits,
   type ThreadId,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -49,6 +51,8 @@ import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresen
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import { CursorTransportFailure } from "./transportFailure.ts";
+import { usesAdaptiveSelection } from "@t3tools/provider-core/server/adaptiveRouting";
+import { resolveCursorAdaptiveSelection } from "./cursorAdaptiveRouting.ts";
 import { cursorContextWindowTokens, cursorSdkModelSelection } from "./sdkModel.ts";
 import {
   appendCursorInvokedSkills,
@@ -1020,6 +1024,7 @@ export interface CursorAdapterV2Options {
   readonly environment: NodeJS.ProcessEnv;
   readonly getModels?: () => ReadonlyArray<ServerProviderModel>;
   readonly getSdkModels?: () => ReadonlyArray<SDKModel>;
+  readonly getUsageLimits?: () => ServerProviderUsageLimits | undefined;
 }
 
 export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
@@ -2692,7 +2697,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
         });
 
         const startTurn = Effect.fn("CursorAdapterV2.startTurn")(
-          function* (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
+          function* (requestedTurnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
             const current = yield* Ref.get(activeTurn);
             if (current !== null) {
               return yield* new ProviderAdapter.ProviderAdapterProtocolError({
@@ -2700,6 +2705,28 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                 detail: `Cursor provider turn ${current.providerTurnId} is still active.`,
                 reason: "previous_turn_active",
               });
+            }
+            let turnInput = requestedTurnInput;
+            if (usesAdaptiveSelection(requestedTurnInput.modelSelection)) {
+              const decision = resolveCursorAdaptiveSelection({
+                selection: requestedTurnInput.modelSelection,
+                models: adapterOptions.getModels?.() ?? [],
+                usageLimits: adapterOptions.getUsageLimits?.(),
+                text:
+                  requestedTurnInput.adaptiveHistory?.taskText ??
+                  requestedTurnInput.message.text.slice(
+                    requestedTurnInput.inlineContextLength ?? 0,
+                  ),
+                history: requestedTurnInput.adaptiveHistory,
+                nowMs: yield* Clock.currentTimeMillis,
+              });
+              if ("error" in decision) {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver: CursorAgentSdk.CURSOR_PROVIDER,
+                  detail: decision.error,
+                });
+              }
+              turnInput = { ...requestedTurnInput, modelSelection: decision.selection };
             }
             const agentId = nativeThreadId(turnInput.providerThread);
             const agent = yield* openAgent({
@@ -2994,6 +3021,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           instanceId: adapterOptions.instanceId,
           driver: CursorAgentSdk.CURSOR_PROVIDER,
           providerSessionId: input.providerSessionId,
+          supportsAdaptiveRouting: true,
           providerSession: session,
           getModelContextWindow: (selection) =>
             selection.instanceId === adapterOptions.instanceId
