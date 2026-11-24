@@ -62,6 +62,15 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import {
+  resolveAdaptiveTurn,
+  usesAdaptiveSelection,
+  type AdaptiveTurnHistory,
+} from "@t3tools/provider-core/server/adaptiveRouting";
+import {
+  openCodeAdaptiveCapabilities,
+  openCodeModelsFromVariants,
+} from "../openCodeAdaptiveRouting.ts";
 import * as OpenCode2Client from "./OpenCode2Client.ts";
 import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
@@ -866,6 +875,36 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       contextWindows.get(directoryOf(cwd))?.get(model);
     const listedModelRef = (selection: ModelSelection, cwd: string | null | undefined) =>
       modelRef(selection, modelVariants.get(directoryOf(cwd))?.get(selection.model));
+    // Resolves Auto to a concrete listed model + variant; manual selections pass through unchanged.
+    const resolveAdaptive = Effect.fn("OpenCode2Adapter.resolveAdaptive")(function* (
+      selection: ModelSelection,
+      cwd: string | null | undefined,
+      text: string,
+      history?: AdaptiveTurnHistory,
+    ) {
+      if (!usesAdaptiveSelection(selection)) return { selection };
+      yield* readModelsOnce(cwd);
+      const directory = directoryOf(cwd);
+      const tierOption = getModelSelectionStringOptionValue(selection, "autoMaxTier");
+      const budget = Number(getModelSelectionStringOptionValue(selection, "autoTokenBudget"));
+      const usageLimits = yield* connection.usageLimits(directory);
+      const decision = resolveAdaptiveTurn({
+        selection,
+        capabilities: {
+          ...openCodeAdaptiveCapabilities(
+            instanceId,
+            openCodeModelsFromVariants(modelVariants.get(directory) ?? new Map()),
+          ),
+          ...(usageLimits ? { usageLimits } : {}),
+        },
+        text,
+        ...(history === undefined ? {} : { history }),
+        maxTier: tierOption === "economy" || tierOption === "worker" ? tierOption : "expert",
+        ...(Number.isSafeInteger(budget) && budget > 0 ? { tokenBudget: budget } : {}),
+        nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+      });
+      return decision;
+    });
     const now = yield* DateTime.now;
     let session: OrchestrationV2ProviderSession = {
       id: input.providerSessionId,
@@ -4748,6 +4787,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
       instanceId,
       driver,
+      supportsAdaptiveRouting: true,
       providerSessionId: input.providerSessionId,
       get providerSession() {
         return session;
@@ -4776,7 +4816,19 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             });
           }
           yield* readModelsOnce(threadInput.runtimePolicy.cwd);
-          const model = listedModelRef(threadInput.modelSelection, threadInput.runtimePolicy.cwd);
+          // Auto picks the real model per turn; the new session just needs a valid placeholder.
+          const initial = yield* resolveAdaptive(
+            threadInput.modelSelection,
+            threadInput.runtimePolicy.cwd,
+            "",
+          );
+          if ("error" in initial) {
+            return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+              driver: OPENCODE_PROVIDER,
+              detail: initial.error,
+            });
+          }
+          const model = listedModelRef(initial.selection, threadInput.runtimePolicy.cwd);
           if (model === undefined) {
             return yield* new ProviderAdapter.ProviderAdapterProtocolError({
               driver: OPENCODE_PROVIDER,
@@ -4954,13 +5006,31 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   }),
                 });
               }
-              const model = listedModelRef(turnInput.modelSelection, turnInput.runtimePolicy.cwd);
+              const decision = yield* resolveAdaptive(
+                turnInput.modelSelection,
+                turnInput.runtimePolicy.cwd,
+                turnInput.adaptiveHistory?.taskText ??
+                  turnInput.message.text.slice(turnInput.inlineContextLength ?? 0),
+                turnInput.adaptiveHistory,
+              );
+              if ("error" in decision) {
+                yield* begin;
+                return yield* finishTurn(state, {
+                  status: "failed",
+                  failure: makeProviderFailure({
+                    message: decision.error,
+                    class: "validation_error",
+                  }),
+                });
+              }
+              const effectiveSelection = decision.selection;
+              const model = listedModelRef(effectiveSelection, turnInput.runtimePolicy.cwd);
               if (model === undefined) {
                 yield* begin;
                 return yield* finishTurn(state, {
                   status: "failed",
                   failure: makeProviderFailure({
-                    message: malformedModel(turnInput.modelSelection.model),
+                    message: malformedModel(effectiveSelection.model),
                     class: "validation_error",
                   }),
                 });

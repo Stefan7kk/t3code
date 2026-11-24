@@ -72,6 +72,7 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import { formatReadToolLabel, formatSearchToolLabel } from "@t3tools/shared/toolActivity";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/mediaPreview";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import { usesAdaptiveSelection } from "@t3tools/provider-core/server/adaptiveRouting";
 import { makeAcpMcpOverAcpBridge, type AcpMcpOverAcpBridge } from "./mcpOverAcpBridge.ts";
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -455,6 +456,13 @@ export interface AcpAdapterV2Flavor {
   /** Values the client shows for options a new session's selection leaves unset. */
   readonly unsetOptionDefaults?: Effect.Effect<NonNullable<ModelSelection["options"]>>;
   readonly resolveModelId?: (selection: ModelSelection) => string | undefined;
+  /**
+   * Resolves an Auto model/effort selection into a concrete one at the start of a turn. Setting
+   * it makes the session advertise adaptive routing; flavors without it reject Auto upstream.
+   */
+  readonly resolveAdaptiveSelection?: (
+    turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+  ) => Effect.Effect<{ readonly selection: ModelSelection } | { readonly error: string }>;
   /**
    * The agent advertises its model option only after `session/new` returns
    * (Kiro sends it in a `config_option_update`), so in-session model switching
@@ -9144,7 +9152,21 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         };
 
         const startTurnUnlocked = Effect.fn("AcpAdapterV2.startTurn")(
-          function* (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
+          function* (requestedTurnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
+            let turnInput = requestedTurnInput;
+            if (
+              flavor.resolveAdaptiveSelection !== undefined &&
+              usesAdaptiveSelection(requestedTurnInput.modelSelection)
+            ) {
+              const decision = yield* flavor.resolveAdaptiveSelection(requestedTurnInput);
+              if ("error" in decision) {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver,
+                  detail: decision.error,
+                });
+              }
+              turnInput = { ...requestedTurnInput, modelSelection: decision.selection };
+            }
             yield* awaitRuntimeTeardown();
             const existing = yield* Ref.get(activeTurn);
             if (existing !== null) {
@@ -9706,6 +9728,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           get providerSession() {
             return providerSession;
           },
+          ...(flavor.resolveAdaptiveSelection === undefined
+            ? {}
+            : { supportsAdaptiveRouting: true as const }),
           canResumeAfterRestart: canLoadSession || canResumeSession,
           events: Stream.fromEffectRepeat(Queue.take(events)),
           ...(flavor.getModelContextWindow === undefined

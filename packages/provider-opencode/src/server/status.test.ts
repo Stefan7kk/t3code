@@ -884,13 +884,18 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
       );
       NodeAssert.deepEqual(
         snapshot.models.map((model) => model.slug),
-        ["opencode/big-pickle", "opencode-go/deepseek-v4.1-flash", "opencode/space-bunny-free"],
+        [
+          "opencode/big-pickle",
+          "opencode-go/deepseek-v4.1-flash",
+          "opencode/space-bunny-free",
+          "t3-auto",
+        ],
       );
       const variant = snapshot.models.find((model) => model.slug === "opencode/space-bunny-free")
         ?.capabilities?.optionDescriptors?.[0];
       NodeAssert.deepEqual(
         variant?.type === "select" ? variant.options.map((option) => option.id) : [],
-        ["low", "medium", "high", "xhigh"],
+        ["t3-auto", "low", "medium", "high", "xhigh"],
       );
       NodeAssert.equal(
         variant?.type === "select"
@@ -903,7 +908,7 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
       )?.capabilities?.optionDescriptors?.[0];
       const goVariantIds =
         goVariant?.type === "select" ? goVariant.options.map((option) => option.id) : [];
-      NodeAssert.deepEqual(goVariantIds, ["low", "high", "max"]);
+      NodeAssert.deepEqual(goVariantIds, ["t3-auto", "low", "high", "max"]);
       NodeAssert.ok(
         goVariant?.type === "select" &&
           goVariant.currentValue !== undefined &&

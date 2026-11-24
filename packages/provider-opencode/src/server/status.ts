@@ -29,6 +29,7 @@ import {
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
+import { withOpenCodeAdaptiveChoices } from "./openCodeAdaptiveRouting.ts";
 import type { ProbedOpenCode } from "./versionProbe.ts";
 import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 import { ServiceUnavailableError } from "@opencode/protocol/errors";
@@ -701,24 +702,26 @@ export function openCode2ProviderModels(
   settings: Pick<OpenCodeSettings, "customModels">,
   catalog: ReadonlyArray<OpenCode2Model>,
 ): ReadonlyArray<ServerProviderModel> {
-  return providerModelsFromSettings(
-    markOpenCodeLegacy(
-      catalog.map((model) => {
-        const subProvider = subProviderLabelFor(model);
-        return {
-          model: {
-            slug: `${model.providerID}/${model.id}`,
-            name: model.name,
-            ...(subProvider ? { subProvider } : {}),
-            isCustom: false,
-            capabilities: openCode2ModelCapabilities(model),
-          },
-          release: model,
-        };
-      }),
-    ).toSorted((left, right) => left.name.localeCompare(right.name)),
-    settings.customModels,
-    DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+  return withOpenCodeAdaptiveChoices(
+    providerModelsFromSettings(
+      markOpenCodeLegacy(
+        catalog.map((model) => {
+          const subProvider = subProviderLabelFor(model);
+          return {
+            model: {
+              slug: `${model.providerID}/${model.id}`,
+              name: model.name,
+              ...(subProvider ? { subProvider } : {}),
+              isCustom: false,
+              capabilities: openCode2ModelCapabilities(model),
+            },
+            release: model,
+          };
+        }),
+      ).toSorted((left, right) => left.name.localeCompare(right.name)),
+      settings.customModels,
+      DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+    ),
   );
 }
 
