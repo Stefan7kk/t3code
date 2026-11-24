@@ -66,20 +66,25 @@ describe("Auto provider allowlist gate", () => {
     expect(choice).toMatchObject({ instanceId: "codex", switched: true });
   });
 
-  it("with an empty allowlist only uses enabled, installed, signed-in providers with Auto", () => {
-    const choice = choose([
-      provider("off", { enabled: false }),
-      provider("missing", { installed: false }),
-      provider("anon", { auth: { status: "unauthenticated" } }),
-      provider("manual", {
-        models: [{ slug: "m", name: "M", isCustom: false, capabilities: null }],
-      }),
-    ]);
-    expect(choice).toMatchObject({
-      error: expect.stringMatching(
-        /off \(disabled\).*missing \(not installed\).*anon \(not signed in\)/,
-      ),
-    });
+  it("fails closed when the allowlist is empty, even if providers are signed in", () => {
+    const choice = choose([provider("claude"), provider("codex", { usedPercent: 0 })]);
+    expect(choice).toMatchObject({ error: expect.stringContaining("allowlist is empty") });
+  });
+
+  it("skips authorized providers that are disabled, unsigned, or not Auto-capable", () => {
+    const choice = choose(
+      [
+        provider("off", { enabled: false }),
+        provider("missing", { installed: false }),
+        provider("anon", { auth: { status: "unauthenticated" } }),
+        provider("manual", {
+          models: [{ slug: "m", name: "M", isCustom: false, capabilities: null }],
+        }),
+        provider("codex"),
+      ],
+      ["off", "missing", "anon", "manual", "codex"],
+    );
+    expect(choice).toMatchObject({ instanceId: "codex" });
   });
 });
 
@@ -87,7 +92,7 @@ describe("Auto provider choice", () => {
   it("prefers the current provider to avoid a context handoff", () => {
     const choice = choose(
       [provider("claude", { usedPercent: 80 }), provider("codex", { usedPercent: 5 })],
-      [],
+      ["claude", "codex"],
       "claude",
     );
     expect(choice).toMatchObject({ instanceId: "claude", switched: false });
@@ -100,14 +105,17 @@ describe("Auto provider choice", () => {
         provider("codex", { usedPercent: 60 }),
         provider("cursor", { usedPercent: 20 }),
       ],
-      [],
+      ["claude", "codex", "cursor"],
       "claude",
     );
     expect(choice).toMatchObject({ instanceId: "cursor", switched: true });
   });
 
   it("is not a switch on a new thread", () => {
-    expect(choose([provider("codex")])).toMatchObject({ instanceId: "codex", switched: false });
+    expect(choose([provider("codex")], ["codex"])).toMatchObject({
+      instanceId: "codex",
+      switched: false,
+    });
   });
 
   it("treats a window that already reset as refilled", () => {
