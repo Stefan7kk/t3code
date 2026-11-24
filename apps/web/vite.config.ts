@@ -141,7 +141,9 @@ const browserTestProject = {
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright(),
+      // The CI renderer intermittently crashes (VITEST_BROWSER_CONNECTION_CLOSED) under the heavy
+      // docx/pptx/xlsx/pdf fixtures; /dev/shm is the usual culprit, so back it with /tmp instead.
+      provider: playwright({ launchOptions: { args: ["--disable-dev-shm-usage"] } }),
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
       commands: {
