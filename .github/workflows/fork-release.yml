@@ -57,6 +57,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           submodules: false
+          # .repos reference gitlinks have no .gitmodules entries; upstream CI excludes them too.
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
       - name: Resolve release intent
         id: intent

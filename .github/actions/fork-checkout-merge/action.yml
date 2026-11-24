@@ -28,6 +28,11 @@ runs:
         fetch-depth: 0
         persist-credentials: ${{ inputs.push-merged == 'true' }}
         submodules: false
+        # .repos reference gitlinks have no .gitmodules entries; upstream CI excludes them too.
+        sparse-checkout: |
+          /*
+          !/.repos/
+        sparse-checkout-cone-mode: false
 
     - name: Merge upstream stable
       if: inputs.upstream-tag != ''
