@@ -135,11 +135,36 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout and merge
-        uses: ./.github/actions/fork-checkout-merge
-        with:
-          main-sha: ${{ needs.detect.outputs.main_sha }}
-          upstream-tag: ${{ needs.detect.outputs.upstream_tag }}
+      - name: Checkout fork main
+        shell: bash
+        env:
+          MAIN_SHA: ${{ needs.detect.outputs.main_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git init --initial-branch=main .
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --no-tags --prune --no-recurse-submodules origin "+refs/heads/*:refs/remotes/origin/*"
+          git checkout --force "$MAIN_SHA"
+          git log -1 --format=%H
+
+      - name: Merge upstream stable
+        if: needs.detect.outputs.upstream_tag != ''
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ needs.detect.outputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Refusing non-stable upstream tag: $UPSTREAM_TAG"
+            exit 1
+          fi
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "+refs/tags/${UPSTREAM_TAG}:refs/tags/upstream/${UPSTREAM_TAG}"
+          git config user.name "t3-fork-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git merge --no-ff "upstream/${UPSTREAM_TAG}" \
+            -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
 
       - name: Secret scan (full history and working tree)
         shell: bash
@@ -185,11 +210,36 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout and merge
-        uses: ./.github/actions/fork-checkout-merge
-        with:
-          main-sha: ${{ needs.detect.outputs.main_sha }}
-          upstream-tag: ${{ needs.detect.outputs.upstream_tag }}
+      - name: Checkout fork main
+        shell: bash
+        env:
+          MAIN_SHA: ${{ needs.detect.outputs.main_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git init --initial-branch=main .
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --no-tags --prune --no-recurse-submodules origin "+refs/heads/*:refs/remotes/origin/*"
+          git checkout --force "$MAIN_SHA"
+          git log -1 --format=%H
+
+      - name: Merge upstream stable
+        if: needs.detect.outputs.upstream_tag != ''
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ needs.detect.outputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Refusing non-stable upstream tag: $UPSTREAM_TAG"
+            exit 1
+          fi
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "+refs/tags/${UPSTREAM_TAG}:refs/tags/upstream/${UPSTREAM_TAG}"
+          git config user.name "t3-fork-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git merge --no-ff "upstream/${UPSTREAM_TAG}" \
+            -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
 
       - name: Setup dependencies
         uses: ./.github/actions/setup-ci-deps
@@ -228,12 +278,39 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout, merge and push
-        uses: ./.github/actions/fork-checkout-merge
-        with:
-          main-sha: ${{ needs.detect.outputs.main_sha }}
-          upstream-tag: ${{ needs.detect.outputs.upstream_tag }}
-          push-merged: "true"
+      - name: Checkout fork main
+        shell: bash
+        env:
+          MAIN_SHA: ${{ needs.detect.outputs.main_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git init --initial-branch=main .
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --no-tags --prune --no-recurse-submodules origin "+refs/heads/*:refs/remotes/origin/*"
+          git checkout --force "$MAIN_SHA"
+          git log -1 --format=%H
+
+      - name: Merge upstream stable and push
+        if: needs.detect.outputs.upstream_tag != ''
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ needs.detect.outputs.upstream_tag }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Refusing non-stable upstream tag: $UPSTREAM_TAG"
+            exit 1
+          fi
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "+refs/tags/${UPSTREAM_TAG}:refs/tags/upstream/${UPSTREAM_TAG}"
+          git config user.name "t3-fork-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git merge --no-ff "upstream/${UPSTREAM_TAG}" \
+            -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" HEAD:refs/heads/main
 
       - name: Download CLI archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
