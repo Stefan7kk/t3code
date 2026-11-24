@@ -41,6 +41,7 @@ import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
 import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
+import { RoutingHistoryPanel } from "./usage/RoutingHistoryPanel";
 import {
   isThreadEnvironmentLocked,
   resolveDraftHeroState,
@@ -3665,6 +3666,14 @@ export default function ChatView(props: ChatViewProps) {
                         : undefined
                     }
                   >
+                    {serverProjection?.providerTurns.some((turn) => turn.adaptiveRoute) ? (
+                      <div className="max-h-48 overflow-auto px-1 pb-2">
+                        <RoutingHistoryPanel
+                          providerTurns={serverProjection.providerTurns}
+                          providerThreads={serverProjection.providerThreads}
+                        />
+                      </div>
+                    ) : null}
                     <ChildThreadApprovals threadRef={activeThreadRef} />
                     <div className="relative">
                       <ComposerSurface.Shell contextRow={showComposerContextStrip}>

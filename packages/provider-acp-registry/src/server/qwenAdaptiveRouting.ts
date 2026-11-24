@@ -214,5 +214,7 @@ export const makeQwenAdaptiveResolver = (input: {
       ...(Number.isSafeInteger(budget) && budget > 0 ? { tokenBudget: budget } : {}),
       nowMs: yield* Clock.currentTimeMillis,
     });
-    return "error" in decision ? { error: decision.error } : { selection: decision.selection };
+    return "error" in decision
+      ? { error: decision.error }
+      : { selection: decision.selection, route: decision.route };
   });

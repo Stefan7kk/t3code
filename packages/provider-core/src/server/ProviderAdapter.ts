@@ -1,5 +1,6 @@
 import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
 import {
+  AdaptiveRoute,
   ChatAttachment,
   CheckpointId,
   MessageId,
@@ -562,6 +563,8 @@ export interface ProviderAdapterV2TurnInput {
     readonly previousSelection?: ModelSelection;
     readonly taskText?: string;
   };
+  /** The Auto decision the adapter resolved for this turn; adapters record it on the provider turn. */
+  readonly adaptiveRoute?: AdaptiveRoute;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;

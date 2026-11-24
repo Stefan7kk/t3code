@@ -56,8 +56,15 @@ describe("resolveProjectSettings", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       defaultAutoPull: true,
       sidebarAutoSettleAfterDays: 3,
+      routingProfile: "performance",
+      autoProviderAllowlist: [ProviderInstanceId.make("codex")],
       projectSettingsOverrides: {
-        [projectId]: { defaultAutoPull: false, sidebarAutoSettleAfterDays: null },
+        [projectId]: {
+          defaultAutoPull: false,
+          sidebarAutoSettleAfterDays: null,
+          routingProfile: "economy",
+          autoProviderAllowlist: [ProviderInstanceId.make("claude")],
+        },
       },
     });
     const resolved = resolveProjectSettings(settings, projectId);
@@ -68,6 +75,16 @@ describe("resolveProjectSettings", () => {
     expect(resolved.sources.sidebarAutoSettleAfterDays).toBe("project");
     expect(resolved.sources.defaultThreadEnvMode).toBe("environment");
     expect(resolveProjectSettings(settings, otherProjectId).settings.defaultAutoPull).toBe(true);
+    expect(resolved.settings.routingProfile).toBe("economy");
+    expect(resolveProjectSettings(settings, otherProjectId).settings.routingProfile).toBe(
+      "performance",
+    );
+    expect(DEFAULT_SERVER_SETTINGS.routingProfile).toBe("balanced");
+    expect(resolved.settings.autoProviderAllowlist).toEqual(["claude"]);
+    expect(resolveProjectSettings(settings, otherProjectId).settings.autoProviderAllowlist).toEqual(
+      ["codex"],
+    );
+    expect(DEFAULT_SERVER_SETTINGS.autoProviderAllowlist).toEqual([]);
   });
 
   it("honours the aggregate's own fields only until the server has folded them", () => {

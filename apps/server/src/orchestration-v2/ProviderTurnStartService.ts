@@ -1,4 +1,6 @@
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import { applyRoutingProfile } from "@t3tools/provider-core/server/adaptiveProfiles";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { adaptiveUsageTokens, usesAdaptiveSelection } from "./adaptiveRouting.ts";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
@@ -284,6 +286,7 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
 
@@ -2139,6 +2142,19 @@ export const layer: Layer.Layer<
                 }),
           }
         : undefined;
+      // The profile only fills Auto limits the selection lacks; manual selections pass through.
+      const routing = usesAdaptiveSelection(run.modelSelection)
+        ? resolveProjectSettings(yield* serverSettings.getSettings, projection.thread.projectId)
+            .settings
+        : undefined;
+      const turnModelSelection =
+        routing === undefined
+          ? run.modelSelection
+          : applyRoutingProfile(run.modelSelection, {
+              profile: routing.routingProfile,
+              maxTier: routing.routingMaxTier,
+              tokenBudget: routing.routingTokenBudget,
+            });
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
@@ -2190,7 +2206,7 @@ export const layer: Layer.Layer<
             ? {}
             : { senderThreadId: message.senderThreadId }),
         },
-        modelSelection: run.modelSelection,
+        modelSelection: turnModelSelection,
         runtimePolicy: resolvedRuntimePolicy,
         ...(adaptiveHistory === undefined ? {} : { adaptiveHistory }),
       });

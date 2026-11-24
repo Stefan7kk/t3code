@@ -16,6 +16,7 @@ import {
   resolveDefaultProviderModelSelection,
   resolveSelectableProviderInstance,
   shouldShowInstanceBadge,
+  withAutoProviderEntry,
 } from "./providerInstances";
 
 function provider(input: {
@@ -649,5 +650,31 @@ describe("provider icon metadata", () => {
     expect(restoredEntry?.acpRegistryAgentId).toBe("swe-agent");
     expect(restoredEntry?.acpRegistryIconUrl).toBe(iconUrl);
     expect(restoredEntry?.enabled).toBe(true);
+  });
+});
+
+describe("withAutoProviderEntry", () => {
+  it("offers Auto only when an enabled provider advertises Auto", () => {
+    const plain = deriveProviderInstanceEntries([
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: "codex",
+        models: [model("gpt")],
+      }),
+    ]);
+    expect(withAutoProviderEntry(plain).map((entry) => entry.instanceId)).toEqual(["codex"]);
+
+    const adaptive = deriveProviderInstanceEntries([
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: "claudeAgent",
+        models: [model("t3-auto", false, true), model("claude-haiku")],
+      }),
+    ]);
+    const withAuto = withAutoProviderEntry(adaptive);
+    expect(withAuto[0]?.instanceId).toBe("auto-provider");
+    expect(withAuto[0]?.models.map((entry) => entry.slug)).toEqual(["t3-auto"]);
+    expect(withAuto[1]?.instanceId).toBe("claudeAgent");
+    expect(withAutoProviderEntry(withAuto)).toBe(withAuto);
   });
 });

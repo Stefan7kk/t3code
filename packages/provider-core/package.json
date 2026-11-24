@@ -15,6 +15,14 @@
       "types": "./src/server/adapterDriver.ts",
       "import": "./src/server/adapterDriver.ts"
     },
+    "./server/adaptiveProfiles": {
+      "types": "./src/server/adaptiveProfiles.ts",
+      "import": "./src/server/adaptiveProfiles.ts"
+    },
+    "./server/autoProvider": {
+      "types": "./src/server/autoProvider.ts",
+      "import": "./src/server/autoProvider.ts"
+    },
     "./server/adaptiveRouting": {
       "types": "./src/server/adaptiveRouting.ts",
       "import": "./src/server/adaptiveRouting.ts"
