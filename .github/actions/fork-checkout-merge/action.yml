@@ -27,6 +27,7 @@ runs:
         ref: ${{ inputs.main-sha }}
         fetch-depth: 0
         persist-credentials: ${{ inputs.push-merged == 'true' }}
+        submodules: false
 
     - name: Merge upstream stable
       if: inputs.upstream-tag != ''
