@@ -12,6 +12,40 @@ import {
 } from "./ClaudeModelCatalog.ts";
 
 describe("Claude Code model routes", () => {
+  it.effect("exposes runtime capabilities only to Auto with the same model settings", () =>
+    Effect.gen(function* () {
+      const routes = yield* makeClaudeCodeModelRoutes(
+        (cwd) => Effect.succeed(cwd === "/different" ? "restricted" : "same"),
+        "/state",
+      );
+      const models = [
+        {
+          value: "sonnet",
+          resolvedModel: "claude-sonnet-90-0",
+          displayName: "Claude Sonnet",
+          description: "",
+          supportedEffortLevels: ["low" as const],
+        },
+      ];
+      yield* routes.record(models, true);
+      yield* routes.settle;
+      assert.strictEqual(
+        (yield* routes.route(BUNDLED_CLAUDE_MODEL_CATALOG, "/project")).runtimeModels,
+        undefined,
+      );
+      assert.deepEqual(
+        (yield* routes.route(BUNDLED_CLAUDE_MODEL_CATALOG, "/project", undefined, true))
+          .runtimeModels,
+        models,
+      );
+      assert.strictEqual(
+        (yield* routes.route(BUNDLED_CLAUDE_MODEL_CATALOG, "/different", undefined, true))
+          .runtimeModels,
+        undefined,
+      );
+    }),
+  );
+
   it.effect(
     "a turn that starts before the first probe settles waits and then gets its routes",
     () =>

@@ -38,6 +38,8 @@ export interface ClaudeCatalogModel {
 
 export interface ClaudeModelCatalog {
   readonly models: ReadonlyArray<ClaudeCatalogModel>;
+  readonly runtimeModels?: ReadonlyArray<ClaudeModelInfo>;
+  readonly runtimeAdvisor?: boolean;
 }
 
 function tryResolveClaudeModelCatalog(

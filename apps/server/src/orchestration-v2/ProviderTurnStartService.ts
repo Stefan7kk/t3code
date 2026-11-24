@@ -1,4 +1,5 @@
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import { adaptiveUsageTokens, usesAdaptiveSelection } from "./adaptiveRouting.ts";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
 import {
@@ -971,6 +972,16 @@ export const layer: Layer.Layer<
       }
       const session = sessionResult.success;
       if (!(yield* isCurrentAttemptInStatus("starting"))) return;
+      if (usesAdaptiveSelection(run.modelSelection) && !session.supportsAdaptiveRouting) {
+        yield* settleStartFailure({
+          signal: "adaptive-routing-unsupported",
+          title: "Auto routing unavailable",
+          error: new Error(
+            "The selected provider does not support Auto routing. Choose a concrete model and effort.",
+          ),
+        });
+        return;
+      }
       const loadFromProvider = Effect.fn("ProviderTurnStartService.loadFromProvider")(function* (
         load: Effect.Effect<OrchestrationV2ProviderThread, ProviderAdapter.ProviderAdapterV2Error>,
       ) {
@@ -2090,6 +2101,44 @@ export const layer: Layer.Layer<
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);
+      const previousAuto = usesAdaptiveSelection(run.modelSelection)
+        ? projection.providerTurns.findLast(
+            (turn) =>
+              turn.providerThreadId === runningProviderThread.id &&
+              turn.runAttemptId !== attempt.id &&
+              turn.status === "completed",
+          )?.adaptiveRoute
+        : undefined;
+      const adaptiveHistory = usesAdaptiveSelection(run.modelSelection)
+        ? {
+            taskText: providerMessage.text,
+            failureCount: previousAuto?.failureCount ?? 0,
+            tokens: projection.providerTurns.reduce(
+              (total, turn) =>
+                total + (turn.adaptiveRoute ? adaptiveUsageTokens(turn.turnTokenUsage) : 0),
+              0,
+            ),
+            ...(previousAuto === undefined
+              ? {}
+              : {
+                  previousSelection: {
+                    instanceId: run.modelSelection.instanceId,
+                    model: previousAuto.requestedModel,
+                    ...(previousAuto.requestedEffort === undefined ||
+                    previousAuto.effortOptionId === undefined
+                      ? {}
+                      : {
+                          options: [
+                            {
+                              id: previousAuto.effortOptionId,
+                              value: previousAuto.requestedEffort,
+                            },
+                          ],
+                        }),
+                  },
+                }),
+          }
+        : undefined;
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
@@ -2143,6 +2192,7 @@ export const layer: Layer.Layer<
         },
         modelSelection: run.modelSelection,
         runtimePolicy: resolvedRuntimePolicy,
+        ...(adaptiveHistory === undefined ? {} : { adaptiveHistory }),
       });
     });
 

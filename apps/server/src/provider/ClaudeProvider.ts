@@ -78,6 +78,7 @@ import {
   resolveClaudeUpdateRequiredModels,
   withUltracodeToggle,
 } from "./ClaudeModelCatalog.ts";
+import { withClaudeAdaptiveChoices } from "./claudeAdaptiveRouting.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -320,6 +321,7 @@ export type ClaudeCapabilitiesProbe = {
   readonly apiProvider: string | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
   readonly models?: ReadonlyArray<ClaudeModelInfo>;
+  readonly advisorSupported?: boolean;
   /** Undefined means get_usage failed; absent windows on success mean no subscription windows, as with API keys. */
   readonly usage?: Pick<SDKControlGetUsageResponse, "rate_limits_available" | "rate_limits">;
   readonly usageCheckedAt?: string;
@@ -598,6 +600,9 @@ const probeClaudeCapabilities = (
           apiKeySource: account?.apiKeySource,
           apiProvider: account?.apiProvider,
           slashCommands: parseClaudeInitializationCommands(init.commands),
+          advisorSupported:
+            (account?.apiProvider === undefined || account.apiProvider === "firstParty") &&
+            init.commands.some(({ name }) => name.replace(/^\//, "") === "advisor"),
           ...(init.models?.length ? { models: init.models } : {}),
           ...(usage ? { usage, usageCheckedAt } : {}),
           ...(effortCapSources ? { effortCapSources } : {}),
@@ -890,7 +895,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,
     checkedAt,
-    models,
+    models: withClaudeAdaptiveChoices(models, capabilities.models),
     updateRequiredModels,
     slashCommands: dedupedSlashCommands,
     skills,

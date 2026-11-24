@@ -126,6 +126,24 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+### Automatic Claude routing
+
+Choose **Auto** in Claude's model picker to select Haiku, Sonnet, or Opus for each
+new turn. Choose **Auto** under Reasoning to match effort to the task. You can use
+either choice on its own. **Default** lets Claude choose its configured effort.
+
+Auto uses lighter settings for lookups and raises them for harder work or
+repeated failures. It keeps the same Claude conversation. The turn's activity
+shows the reason, the model and effort Claude reported, and token usage when
+available. A substantial review can ask a read-only native agent to inspect
+pending changes in the working tree.
+
+Under the Auto model, you can cap the model tier and set a per-thread token
+budget. The budget is checked before each Auto turn, so a turn in progress can
+cross it. If the selected provider can't honor a route, choose a model or effort
+manually, or adjust the Auto limit. Available subscription limits influence
+effort and delegation.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

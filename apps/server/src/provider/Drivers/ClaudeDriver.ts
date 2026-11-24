@@ -1,4 +1,4 @@
-import { ClaudeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import type * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
@@ -188,6 +188,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         onSessionInit: (cwd) => Queue.offer(workspaceRescans, cwd).pipe(Effect.asVoid),
         modelCatalog,
         routeModelCatalog: modelRoutes.route,
+        routingUsageLimits: (): Effect.Effect<ServerProvider["usageLimits"]> =>
+          snapshot.getSnapshot.pipe(Effect.map((provider) => provider.usageLimits)),
       },
     ).pipe(
       Effect.mapError(
@@ -225,7 +227,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
           ),
           Effect.tap(({ capabilities }) =>
             Ref.set(lastGoodCapabilities, capabilities).pipe(
-              Effect.andThen(modelRoutes.record(capabilities.models ?? [])),
+              Effect.andThen(
+                modelRoutes.record(capabilities.models ?? [], capabilities.advisorSupported),
+              ),
             ),
           ),
           Effect.ensuring(modelRoutes.settle),

@@ -4,6 +4,21 @@ import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
 
+export const ADAPTIVE_SELECTION = "t3-auto";
+export const AdaptiveModelTier = Schema.Literals(["economy", "worker", "expert"]);
+export type AdaptiveModelTier = typeof AdaptiveModelTier.Type;
+
+export const AdaptiveRoute = Schema.Struct({
+  tier: Schema.optional(AdaptiveModelTier),
+  reason: TrimmedNonEmptyString,
+  requestedModel: TrimmedNonEmptyString,
+  requestedEffort: Schema.optional(TrimmedNonEmptyString),
+  effortOptionId: Schema.optional(TrimmedNonEmptyString),
+  effectiveEffort: Schema.optional(TrimmedNonEmptyString),
+  failureCount: Schema.optional(Schema.Int),
+});
+export type AdaptiveRoute = typeof AdaptiveRoute.Type;
+
 export const ProviderOptionDescriptorType = Schema.Literals(["select", "boolean"]);
 export type ProviderOptionDescriptorType = typeof ProviderOptionDescriptorType.Type;
 

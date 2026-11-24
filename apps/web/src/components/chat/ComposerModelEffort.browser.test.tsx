@@ -1,4 +1,5 @@
 import {
+  ADAPTIVE_SELECTION,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderOptionSelection,
@@ -74,18 +75,51 @@ function traitsInput(
   };
 }
 
-function Column() {
+function Column({ auto = false }: { auto?: boolean } = {}) {
   const [options, setOptions] = useState<ReadonlyArray<ProviderOptionSelection>>([]);
   const traits = traitsInput(options, (next) => setOptions(next ?? []));
+  const input = auto
+    ? {
+        ...traits,
+        models: models.map((model) => ({
+          ...model,
+          capabilities: {
+            optionDescriptors:
+              model.capabilities?.optionDescriptors?.map((option) =>
+                option.type === "select" && option.role === "reasoning"
+                  ? {
+                      ...option,
+                      options: [{ id: ADAPTIVE_SELECTION, label: "Auto" }, ...option.options],
+                    }
+                  : option,
+              ) ?? [],
+          },
+        })),
+      }
+    : traits;
   return (
     <>
       <div data-model-picker-effort>
-        <ComposerEffortColumn traits={traits} />
+        <ComposerEffortColumn traits={input} />
       </div>
-      <p role="status">{describeComposerEffort(traits, "bars", "sm").suffix}</p>
+      <p role="status">{describeComposerEffort(input, "bars", "sm").suffix}</p>
     </>
   );
 }
+
+it("picks Auto reasoning for a concrete model and returns to manual effort", async () => {
+  await using screen = await render(<Column auto />, { router: false }); // no routes involved
+  const reasoning = screen.getByRole("radiogroup", { name: "Thinking" });
+  const auto = reasoning.getByRole("radio", { name: "Auto" });
+  await userEvent.click(auto);
+  await expect.element(auto).toHaveAttribute("aria-checked", "true");
+  await expect.element(screen.getByRole("status")).toHaveTextContent("Auto");
+  await userEvent.click(reasoning.getByRole("radio", { name: "High" }));
+  await expect.element(auto).toHaveAttribute("aria-checked", "false");
+  await expect
+    .element(reasoning.getByRole("radio", { name: "High" }))
+    .toHaveAttribute("aria-checked", "true");
+});
 
 it("draws an agent's reasoning as bars and keeps its mode out of the levels", async () => {
   await using screen = await render(<Column />, { router: false }); // no routes involved

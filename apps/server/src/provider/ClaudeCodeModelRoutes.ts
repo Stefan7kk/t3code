@@ -71,7 +71,7 @@ export const resolveClaudeModelSettingsKey = Effect.fn("resolveClaudeModelSettin
   );
 });
 
-type ReportedModel = Pick<ClaudeModelInfo, "value" | "resolvedModel">;
+type ReportedModel = Pick<ClaudeModelInfo, "value" | "resolvedModel"> & Partial<ClaudeModelInfo>;
 
 /**
  * Claude Code's reported model ids, applied to a turn only where its cwd resolves model settings
@@ -85,18 +85,21 @@ export const makeClaudeCodeModelRoutes = Effect.fn("makeClaudeCodeModelRoutes")(
   const reported = yield* Ref.make<{
     readonly models: ReadonlyArray<ReportedModel>;
     readonly settingsKey: string | undefined;
-  }>({ models: [], settingsKey: undefined });
+    readonly advisor: boolean;
+  }>({ models: [], settingsKey: undefined, advisor: false });
   return {
     record: Effect.fn("ClaudeCodeModelRoutes.record")(function* (
       models: ReadonlyArray<ReportedModel>,
+      advisor = false,
     ) {
-      yield* Ref.set(reported, { models, settingsKey: yield* settingsKey(probeCwd) });
+      yield* Ref.set(reported, { models, settingsKey: yield* settingsKey(probeCwd), advisor });
     }),
     settle: Deferred.succeed(firstProbeSettled, undefined).pipe(Effect.asVoid),
     route: Effect.fn("ClaudeCodeModelRoutes.route")(function* (
       base: ClaudeModelCatalog,
       cwd: string | null,
       launchSettings?: ClaudeSdkSettings,
+      includeRuntimeModels = false,
     ) {
       // Leave room for the sequential version and capability probes before falling back once;
       // an expired wait counts as settled so later calls do not wait again.
@@ -105,12 +108,20 @@ export const makeClaudeCodeModelRoutes = Effect.fn("makeClaudeCodeModelRoutes")(
         Effect.andThen(Deferred.succeed(firstProbeSettled, undefined)),
       );
       if (claudeModelSettingsKey(launchSettings ?? {}) !== NO_MODEL_SETTINGS_KEY) return base;
-      const { models, settingsKey: probeKey } = yield* Ref.get(reported);
+      const { models, settingsKey: probeKey, advisor } = yield* Ref.get(reported);
       const routed = withClaudeCodeModelRoutes(base, models);
+      if (routed === base && !includeRuntimeModels) return base;
       // Project settings can point an alias at another model, so routes hold only where the
       // cwd resolves the same model settings as the probe's.
-      if (routed === base || probeKey === undefined) return base;
-      return (yield* settingsKey(cwd)) === probeKey ? routed : base;
+      if (probeKey === undefined || (yield* settingsKey(cwd)) !== probeKey) return base;
+      if (!includeRuntimeModels) return routed;
+      const runtimeModels = models.filter(
+        (model): model is ClaudeModelInfo =>
+          model.displayName !== undefined && model.description !== undefined,
+      );
+      return runtimeModels.length === 0
+        ? routed
+        : { ...routed, runtimeModels, runtimeAdvisor: advisor };
     }),
   };
 });

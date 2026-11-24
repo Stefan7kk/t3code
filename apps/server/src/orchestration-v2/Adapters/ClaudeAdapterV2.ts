@@ -1,5 +1,21 @@
 import * as DocumentText from "../../provider/DocumentText.ts";
 import {
+  ADAPTIVE_SELECTION,
+  type AdaptiveRoute,
+  type AdaptiveModelTier,
+  type ServerProviderUsageLimits,
+} from "@t3tools/contracts";
+import { resolveAdaptiveTurn, usesAdaptiveSelection } from "../adaptiveRouting.ts";
+import {
+  claudeAdaptiveAgentGuidance,
+  claudeAdaptiveAgents,
+  claudeAdaptiveCapabilities,
+  claudeAdaptiveDiffTool,
+  claudeAdaptiveReviewServer,
+  claudeAdaptiveUsageLimits,
+  readClaudeAdaptiveDiff,
+} from "../../provider/claudeAdaptiveRouting.ts";
+import {
   compactDynamicToolOutput,
   mcpToolResultOutput,
   toolOutputImages,
@@ -85,7 +101,10 @@ import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as ProviderProcesses from "../../process/providerProcesses.ts";
 import * as SpawnWorker from "../../process/SpawnWorker.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
+import {
+  applyClaudePromptEffortPrefix,
+  getModelSelectionStringOptionValue,
+} from "@t3tools/shared/model";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   CLAUDE_RESUME_COMPACTION_COMPACT_ANSWER,
@@ -132,6 +151,7 @@ import {
   type ProviderThreadId,
   type RunId,
   type ThreadId,
+  type TurnTokenUsage,
   resolveIdleCompaction,
   isDelegatedAppThread,
 } from "@t3tools/contracts";
@@ -2271,6 +2291,11 @@ export function makeClaudeQueryOptions(input: {
   readonly onUserDialog?: ClaudeQueryOptions["onUserDialog"];
   readonly onElicitation?: ClaudeQueryOptions["onElicitation"];
   readonly onStop?: HookCallback;
+  readonly routing?: {
+    readonly agents: ClaudeQueryOptions["agents"];
+    readonly advisor?: string;
+    readonly hooks?: ClaudeQueryOptions["hooks"];
+  };
   readonly supportedDialogKinds?: ClaudeQueryOptions["supportedDialogKinds"];
   readonly allowDangerouslySkipPermissions?: boolean;
   readonly appendSystemPromptFileText?: string;
@@ -2314,10 +2339,22 @@ export function makeClaudeQueryOptions(input: {
     ? { resume: input.nativeThreadId }
     : { sessionId: input.nativeThreadId };
   const selectedTools = input.tools ?? CLAUDE_CODE_PRESET_TOOLS;
-  const selectionSettings =
-    Object.keys(compiledSelection.settings).length === 0
+  const selectionSettings: ClaudeSdkSettings | undefined =
+    Object.keys(compiledSelection.settings).length === 0 && input.routing === undefined
       ? undefined
-      : (compiledSelection.settings as ClaudeSdkSettings);
+      : ({
+          ...compiledSelection.settings,
+          ...(input.routing === undefined
+            ? {}
+            : {
+                fallbackModel: [],
+                switchModelsOnFlag: false,
+                ...(input.routing.advisor === undefined
+                  ? {}
+                  : { advisorModel: input.routing.advisor }),
+              }),
+        } satisfies ClaudeSdkSettings);
+  if (input.routing !== undefined) delete extraArgs["fallback-model"];
   const querySettings =
     selectionSettings === undefined
       ? input.sdkSettings
@@ -2415,6 +2452,7 @@ export function makeClaudeQueryOptions(input: {
       : {}),
     ...(input.environment === undefined ? {} : { env: input.environment }),
     ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
+    ...(input.routing?.agents === undefined ? {} : { agents: input.routing.agents }),
     systemPrompt: {
       type: "preset" as const,
       preset: "claude_code" as const,
@@ -2431,9 +2469,10 @@ export function makeClaudeQueryOptions(input: {
         ...launchAppendSystemPrompt,
       ].join("\n\n"),
     },
-    ...(deviceInstructions || input.onStop !== undefined
+    ...(deviceInstructions || input.onStop !== undefined || input.routing?.hooks
       ? {
           hooks: {
+            ...input.routing?.hooks,
             ...(deviceInstructions
               ? { SubagentStart: [{ hooks: [subagentDeviceInstructions] }] }
               : {}),
@@ -5084,6 +5123,9 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
 }
 
 interface ActiveClaudeTurnContext {
+  adaptiveRoute?: AdaptiveRoute;
+  readonly routingAgentsUsed?: Set<string>;
+  adaptiveTestFailed?: boolean;
   retryBudgetFailure?: OrchestrationV2ProviderFailure;
   // Set when the prompt starts or a request goes out; cleared by the turn's next frame.
   unansweredRequestSince?: DateTime.Utc | undefined;
@@ -5237,6 +5279,12 @@ interface ActiveClaudeSubagent {
 }
 
 interface ClaudeLiveQueryContext {
+  adaptive?: {
+    readonly key: string;
+    readonly selection: ModelSelection;
+    readonly route: AdaptiveRoute;
+    readonly agentGuidance: string;
+  };
   readonly queryPolicy: ClaudeRuntimeQueryPolicy;
   readonly nativeThreadId: string;
   readonly settingsCwd: string | null;
@@ -5683,7 +5731,9 @@ export interface ClaudeAdapterV2Options {
     catalog: ClaudeModelCatalog,
     cwd: string | null,
     launchSettings?: ClaudeSdkSettings,
+    includeRuntimeModels?: boolean,
   ) => Effect.Effect<ClaudeModelCatalog>;
+  readonly routingUsageLimits?: () => Effect.Effect<ServerProviderUsageLimits | undefined>;
   readonly continuationRequests?: {
     readonly offer: (
       request: ProviderContinuationRequests.ProviderContinuationRequest,
@@ -7170,9 +7220,65 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           status: input.status,
           startedAt: input.context.startedAt,
           completedAt: input.completedAt,
+          ...(input.context.adaptiveRoute === undefined
+            ? {}
+            : { adaptiveRoute: input.context.adaptiveRoute }),
           ...(input.context.executedModel === undefined
             ? {}
             : { model: input.context.executedModel }),
+        });
+
+        const adaptiveRoutingNotice = Effect.fn("ClaudeAdapterV2.adaptiveRoutingNotice")(function* (
+          context: ActiveClaudeTurnContext,
+          at: DateTime.Utc,
+          usage?: TurnTokenUsage,
+        ) {
+          const route = context.adaptiveRoute;
+          if (!route) return;
+          const nativeItemId = `adaptive-routing:${context.providerTurnId}`;
+          const inputTokens = usage?.inputTokens;
+          const outputTokens = usage?.outputTokens;
+          const usageText =
+            inputTokens === undefined && outputTokens === undefined
+              ? "Token usage unavailable"
+              : `${inputTokens ?? "unknown"} input · ${outputTokens ?? "unknown"} output${usage?.cachedInputTokens === undefined ? "" : ` · ${usage.cachedInputTokens} cache reads`}${usage?.otherUsage === undefined ? "" : ` · ${usage.otherUsage.inputTokens + usage.otherUsage.outputTokens} additional provider tokens`}`;
+          const observedModel = [...context.rootModels].join(", ") || "Unreported";
+          const message = `Auto · ${route.reason}. Model: ${observedModel}. Effective effort: ${route.effectiveEffort ?? "unreported"}. ${usageText}.${
+            context.rootModels.size > 0 && !context.rootModels.has(route.requestedModel)
+              ? ` Requested ${route.requestedModel}.`
+              : ""
+          }${
+            route.requestedEffort !== undefined &&
+            route.effectiveEffort !== undefined &&
+            route.requestedEffort !== route.effectiveEffort
+              ? ` Requested effort ${route.requestedEffort}.`
+              : ""
+          }`;
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver: CLAUDE_PROVIDER,
+            turnItem: {
+              id: idAllocator.derive.turnItemFromProviderItem({
+                driver: CLAUDE_PROVIDER,
+                nativeItemId,
+              }),
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId: context.input.rootNodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef: { driver: CLAUDE_PROVIDER, nativeId: nativeItemId, strength: "weak" },
+              parentItemId: null,
+              ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+              type: "system_notice",
+              status: "completed",
+              title: message,
+              message,
+              startedAt: at,
+              completedAt: at,
+              updatedAt: at,
+            },
+          });
         });
 
         const buildToolCallArtifacts = (input: {
@@ -9414,6 +9520,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             requested.status === "interrupted" && retryBudgetFailure !== undefined
               ? { ...requested, status: "failed" as const, failure: retryBudgetFailure }
               : requested;
+          if (
+            input.status === "completed" &&
+            input.context.adaptiveRoute &&
+            input.context.adaptiveTestFailed !== undefined
+          ) {
+            input.context.adaptiveRoute = {
+              ...input.context.adaptiveRoute,
+              failureCount: input.context.adaptiveTestFailed
+                ? (input.context.adaptiveRoute.failureCount ?? 0) + 1
+                : 0,
+            };
+          }
           input.context.steersClosed = true;
           yield* reasoningDeltas.flushTurn(input.context.nativeTurnId);
           if (input.status === "completed") {
@@ -9652,6 +9770,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   failure: null,
                   threadDisposition,
                 };
+          const turnTokenUsage = normalizeClaudeTurnTokenUsage(
+            input.result,
+            input.context.subagentsByTaskId.size > 0 || input.context.subagentsByToolUseId.size > 0,
+            input.status,
+            input.context.steeredSegmentUsage,
+            {
+              rootModels: input.context.rootModels,
+              ...(input.result === undefined
+                ? {}
+                : {
+                    ledger: addClaudeLedgerUsage(
+                      input.context.steeredLedgerUsage,
+                      resultLedgerUsage.get(input.result),
+                    ),
+                  }),
+            },
+          );
+          yield* adaptiveRoutingNotice(input.context, input.completedAt, turnTokenUsage);
           yield* Effect.all(
             [
               emitProviderEvent({
@@ -9663,24 +9799,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     status: input.status,
                     completedAt: input.completedAt,
                   }),
-                  turnTokenUsage: normalizeClaudeTurnTokenUsage(
-                    input.result,
-                    input.context.subagentsByTaskId.size > 0 ||
-                      input.context.subagentsByToolUseId.size > 0,
-                    input.status,
-                    input.context.steeredSegmentUsage,
-                    {
-                      rootModels: input.context.rootModels,
-                      ...(input.result === undefined
-                        ? {}
-                        : {
-                            ledger: addClaudeLedgerUsage(
-                              input.context.steeredLedgerUsage,
-                              resultLedgerUsage.get(input.result),
-                            ),
-                          }),
-                    },
-                  ),
+                  turnTokenUsage,
                 },
               }),
               // Emit the roster before root settlement so writeFinalRunEvents preserves it.
@@ -12939,11 +13058,84 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           queryPolicy: Effect.Success<ReturnType<typeof queryPolicyForTurn>>,
         ) {
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
-          // Claude Code defers its goal Stop hook only for its own background tasks, so a goal
-          // re-prompts in a loop while T3 work that will wake this thread is still running.
-          const onStop: HookCallback = () =>
+          const onRoutedTool: HookCallback = (hook) =>
             runPromise(
               Effect.gen(function* () {
+                const context = yield* Ref.get(activeTurn);
+                if (!context?.adaptiveRoute || context.nativeThreadId !== nativeThreadId) return {};
+                if (!hook.agent_id && hook.effort?.level) {
+                  context.adaptiveRoute = {
+                    ...context.adaptiveRoute,
+                    effectiveEffort: hook.effort.level,
+                  };
+                }
+                const input = "tool_input" in hook ? hook.tool_input : undefined;
+                if (hook.hook_event_name === "PreToolUse") {
+                  const agent = field(input, "subagent_type");
+                  if (
+                    typeof agent !== "string" ||
+                    !["map", "callers", "tester", "audit", "audit-expert", "architect"].includes(
+                      agent,
+                    )
+                  )
+                    return {};
+                  const used = context.routingAgentsUsed;
+                  const category = agent === "map" || agent === "callers" ? "exploration" : agent;
+                  if (
+                    hook.agent_id ||
+                    used?.has(category) ||
+                    (agent === "audit-expert" && !used?.has("audit"))
+                  ) {
+                    return {
+                      hookSpecificOutput: {
+                        hookEventName: "PreToolUse" as const,
+                        permissionDecision: "deny" as const,
+                        permissionDecisionReason:
+                          "The Auto delegation limit for this turn was reached.",
+                      },
+                    };
+                  }
+                  used?.add(category);
+                } else if (
+                  hook.hook_event_name === "PostToolUse" ||
+                  hook.hook_event_name === "PostToolUseFailure"
+                ) {
+                  const command = field(input, "command");
+                  if (
+                    typeof command === "string" &&
+                    /\b(?:pytest|vitest|jest|ctest|cargo test|go test|dotnet test|npm test|pnpm test|vp test|bun test|node --test)\b/i.test(
+                      command,
+                    )
+                  ) {
+                    if (
+                      hook.hook_event_name === "PostToolUse" ||
+                      (!hook.is_interrupt &&
+                        !/denied|permission|rejected|cancelled/i.test(hook.error))
+                    ) {
+                      context.adaptiveTestFailed = hook.hook_event_name === "PostToolUseFailure";
+                    }
+                  }
+                }
+                return {};
+              }),
+            );
+          // Claude Code defers its goal Stop hook only for its own background tasks, so a goal
+          // re-prompts in a loop while T3 work that will wake this thread is still running.
+          const onStop: HookCallback = (hook) =>
+            runPromise(
+              Effect.gen(function* () {
+                const context = yield* Ref.get(activeTurn);
+                if (
+                  context?.nativeThreadId === nativeThreadId &&
+                  context.adaptiveRoute &&
+                  !hook.agent_id &&
+                  hook.effort?.level
+                ) {
+                  context.adaptiveRoute = {
+                    ...context.adaptiveRoute,
+                    effectiveEffort: hook.effort.level,
+                  };
+                }
                 if (goalsByNativeThread.get(nativeThreadId)?.status !== "active") return {};
                 const pendingWake = (yield* mcpSessions.read(turnInput.threadId))?.hasPendingWake;
                 return pendingWake !== undefined && (yield* pendingWake) ? { continue: false } : {};
@@ -12967,7 +13159,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             !existing.stopping &&
             isClaudeProviderContinuationTurn(turnInput)
           ) {
-            return existing;
+            return {
+              querySession: existing,
+              effectiveSelection: existing.adaptive?.selection ?? turnInput.modelSelection,
+            };
           }
           const reuseLaunchSettings =
             existing !== null &&
@@ -12983,18 +13178,171 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           let launchArgSettings = reuseLaunchSettings
             ? existing.launchArgSettings
             : yield* readLaunchSettings;
+          const wantsAuto = usesAdaptiveSelection(turnInput.modelSelection);
           let catalog = yield* routeModelCatalog(
             modelCatalog,
             turnInput.runtimePolicy.cwd,
             launchArgSettings,
+            wantsAuto,
           );
-          let compiledSelection = compileClaudeModelSelection(turnInput.modelSelection, catalog);
+          const existingAuto =
+            existing?.nativeThreadId === nativeThreadId ? existing.adaptive : undefined;
+          const isControlTurn =
+            turnInput.resume ||
+            isClaudeProviderContinuationTurn(turnInput) ||
+            /^\/(?:compact|goal|model|effort|advisor)(?:\s|$)/i.test(turnInput.message.text.trim());
+          let adaptive: ClaudeLiveQueryContext["adaptive"];
+          let routing: Parameters<typeof makeClaudeQueryOptions>[0]["routing"];
+          let effectiveSelection = turnInput.modelSelection;
+          if (wantsAuto && isControlTurn) {
+            if (existingAuto) {
+              adaptive = { ...existingAuto, agentGuidance: "" };
+              effectiveSelection = existingAuto.selection;
+            } else if (turnInput.adaptiveHistory?.previousSelection !== undefined) {
+              effectiveSelection = turnInput.adaptiveHistory.previousSelection;
+            } else if (turnInput.modelSelection.model !== ADAPTIVE_SELECTION) {
+              const options = turnInput.modelSelection.options?.filter(
+                ({ value }) => value !== ADAPTIVE_SELECTION,
+              );
+              effectiveSelection = { ...turnInput.modelSelection, options: options ?? [] };
+            } else {
+              return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                driver: CLAUDE_PROVIDER,
+                detail:
+                  "Choose a concrete model for this Claude command, or first start an Auto conversation turn.",
+              });
+            }
+          } else if (wantsAuto) {
+            const cwd = turnInput.runtimePolicy.cwd;
+            const capabilities = claudeAdaptiveCapabilities(adapterOptions.instanceId, catalog);
+            const fixedEffort = yield* resolveClaudeEnv(
+              cwd,
+              launchArgSettings,
+              "CLAUDE_CODE_EFFORT_LEVEL",
+            );
+            const snapshotUsageLimits =
+              adapterOptions.routingUsageLimits === undefined
+                ? undefined
+                : yield* adapterOptions.routingUsageLimits();
+            const usageLimits =
+              snapshotUsageLimits === undefined
+                ? undefined
+                : claudeAdaptiveUsageLimits(capabilities, snapshotUsageLimits);
+            const tierOption = getModelSelectionStringOptionValue(
+              turnInput.modelSelection,
+              "autoMaxTier",
+            );
+            const maxTier: AdaptiveModelTier =
+              tierOption === "economy" || tierOption === "worker" ? tierOption : "expert";
+            const budget = Number(
+              getModelSelectionStringOptionValue(turnInput.modelSelection, "autoTokenBudget"),
+            );
+            const nowMs = yield* Clock.currentTimeMillis;
+            const decision = resolveAdaptiveTurn({
+              selection: turnInput.modelSelection,
+              capabilities: {
+                ...capabilities,
+                ...(fixedEffort ? { fixedEffort } : {}),
+                ...(usageLimits ? { usageLimits } : {}),
+              },
+              text:
+                turnInput.adaptiveHistory?.taskText ??
+                turnInput.message.text.slice(turnInput.inlineContextLength ?? 0),
+              ...(turnInput.adaptiveHistory === undefined
+                ? {}
+                : { history: turnInput.adaptiveHistory }),
+              maxTier,
+              ...(Number.isSafeInteger(budget) && budget > 0 ? { tokenBudget: budget } : {}),
+              nowMs,
+            });
+            if ("error" in decision) {
+              return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                driver: CLAUDE_PROVIDER,
+                detail: decision.error,
+              });
+            }
+            effectiveSelection = decision.selection;
+            const constrained = usageLimits?.windows.some(
+              (window) =>
+                window.usedPercent >= 90 &&
+                (!window.resetsAt || Date.parse(window.resetsAt) > nowMs),
+            );
+            const auditTool = cwd === null ? undefined : claudeAdaptiveDiffTool;
+            const permittedTiers =
+              maxTier === "economy"
+                ? ["economy"]
+                : maxTier === "worker" || constrained
+                  ? ["economy", "worker"]
+                  : ["economy", "worker", "expert"];
+            const agentCapabilities = {
+              ...capabilities,
+              models: capabilities.models.filter(
+                (model) =>
+                  model.tier !== undefined &&
+                  permittedTiers.includes(model.tier) &&
+                  !usageLimits?.windows.some(
+                    (window) =>
+                      window.usedPercent >= 95 &&
+                      (!window.resetsAt || Date.parse(window.resetsAt) > nowMs) &&
+                      (window.modelIds?.includes(model.id) ||
+                        window.modelIds?.includes(model.reportedId ?? "")),
+                  ),
+              ),
+            };
+            const agents = fixedEffort
+              ? {}
+              : claudeAdaptiveAgents(
+                  agentCapabilities,
+                  auditTool,
+                  permittedTiers.includes("expert"),
+                );
+            const configuredSettings =
+              catalog.runtimeAdvisor &&
+              decision.route.requestedEffort === "high" &&
+              decision.route.tier === "worker" &&
+              permittedTiers.includes("expert")
+                ? yield* Effect.tryPromise({
+                    try: () =>
+                      resolveClaudeSettings({
+                        ...(cwd === null ? {} : { cwd }),
+                        settingSources: customHome
+                          ? ["project", "local"]
+                          : ["user", "project", "local"],
+                      }),
+                    catch: (cause) => queryRunnerError(cause, "resolveSettings"),
+                  }).pipe(Effect.orElseSucceed(() => undefined))
+                : undefined;
+            const advisor =
+              configuredSettings &&
+              !customHome &&
+              !launchArgSettings?.advisorModel &&
+              configuredSettings.effective.advisorModel === undefined
+                ? agentCapabilities.models.find((model) => model.tier === "expert")?.reportedId
+                : undefined;
+            routing = {
+              agents,
+              ...(advisor === undefined ? {} : { advisor }),
+              hooks: {
+                PreToolUse: [{ matcher: "Agent|Task", hooks: [onRoutedTool], onFailure: "block" }],
+                PostToolUse: [{ matcher: "Bash|PowerShell", hooks: [onRoutedTool] }],
+                PostToolUseFailure: [{ matcher: "Bash|PowerShell", hooks: [onRoutedTool] }],
+              },
+            };
+            adaptive = {
+              key: encodeClaudeJson([agents, advisor]),
+              selection: effectiveSelection,
+              route: decision.route,
+              agentGuidance: claudeAdaptiveAgentGuidance(decision.route.reason, agents),
+            };
+          }
+          let compiledSelection = compileClaudeModelSelection(effectiveSelection, catalog);
           if (
             !turnInput.resume &&
             existing !== null &&
             existing.nativeThreadId === nativeThreadId &&
             existing.queryPolicyKey === queryPolicyKey &&
             !existing.stopping &&
+            existing.adaptive?.key === adaptive?.key &&
             existing.selection.queryIdentity !== compiledSelection.queryIdentity &&
             canApplyClaudeSelectionLive(existing.selection, compiledSelection) &&
             (existing.selection.apiModelId === compiledSelection.apiModelId ||
@@ -13008,8 +13356,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             existing.nativeThreadId === nativeThreadId &&
             existing.queryPolicyKey === queryPolicyKey &&
             !existing.stopping &&
+            existing.adaptive?.key === adaptive?.key &&
             existing.selection.queryIdentity === compiledSelection.queryIdentity
           ) {
+            if (adaptive !== undefined) existing.adaptive = adaptive;
             // A denied ExitPlanMode leaves Claude in plan mode. Restore only from plan:
             // Auto/default may reflect a policy restriction that forbids restoring bypass.
             if (existing.permissionMode === "plan" && existing.openedPermissionMode !== "plan") {
@@ -13027,7 +13377,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   }),
                 );
             }
-            return existing;
+            return { querySession: existing, effectiveSelection };
           }
 
           // Replacing this thread's process kills its background work, even with a new native identity.
@@ -13047,8 +13397,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               modelCatalog,
               turnInput.runtimePolicy.cwd,
               launchArgSettings,
+              wantsAuto,
             );
-            compiledSelection = compileClaudeModelSelection(turnInput.modelSelection, catalog);
+            compiledSelection = compileClaudeModelSelection(effectiveSelection, catalog);
           }
 
           // Read before closing the live process so a bad path leaves it running.
@@ -13082,8 +13433,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             turnInput.nativeThreadHasTurns ?? turnInput.providerTurnOrdinal > 1;
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          const reviewCwd = turnInput.runtimePolicy.cwd;
+          const reviewEnabled = reviewCwd !== null && routing?.agents?.audit !== undefined;
+          const reviewServers = reviewEnabled
+            ? claudeAdaptiveReviewServer(() =>
+                runPromise(
+                  readClaudeAdaptiveDiff(reviewCwd).pipe(
+                    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+                  ),
+                ),
+              )
+            : undefined;
           const queryOptions = makeClaudeQueryOptions({
-            modelSelection: turnInput.modelSelection,
+            modelSelection: effectiveSelection,
             modelCatalog: catalog,
             nativeThreadId,
             title: turnInput.appThread.title,
@@ -13107,12 +13469,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               shouldResume,
             ),
             tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
-            ...(mcpOverrides.allowedTools === undefined
+            ...(mcpOverrides.allowedTools === undefined && !reviewEnabled
               ? {}
-              : { allowedTools: mcpOverrides.allowedTools }),
-            ...(mcpOverrides.mcpServers === undefined
+              : {
+                  allowedTools: [
+                    ...(mcpOverrides.allowedTools ?? []),
+                    ...(reviewEnabled ? [claudeAdaptiveDiffTool] : []),
+                  ],
+                }),
+            ...(mcpOverrides.mcpServers === undefined && reviewServers === undefined
               ? {}
-              : { mcpServers: mcpOverrides.mcpServers }),
+              : { mcpServers: { ...mcpOverrides.mcpServers, ...reviewServers } }),
             deviceToolsAvailable: mcpSession?.capabilities?.has("device") === true,
             permissionMode: queryPolicy.permissionMode,
             ...(queryPolicy.allowDangerouslySkipPermissions === undefined
@@ -13124,6 +13491,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             onUserDialog,
             onElicitation,
             onStop,
+            ...(routing === undefined ? {} : { routing }),
             supportedDialogKinds: ["resume_return"],
             ...(appendSystemPromptFileText === undefined ? {} : { appendSystemPromptFileText }),
             ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
@@ -13180,6 +13548,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             query: querySession,
             queryPolicyKey,
             selection: compiledSelection,
+            ...(adaptive === undefined ? {} : { adaptive }),
             closed,
             lastTurn: null,
             promptEchoMode: "unknown",
@@ -13310,7 +13679,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             Effect.ensuring(Deferred.succeed(closed, undefined)),
             Effect.forkIn(sessionScope),
           );
-          return context;
+          return { querySession: context, effectiveSelection };
         });
 
         const startTurn = Effect.fn("ClaudeAdapterV2.startTurn")(
@@ -13400,9 +13769,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               pdfBudgets.get(nativeThreadId)!,
               persistAttachmentBudget(nativeThreadId),
             );
+            const autoQuery = usesAdaptiveSelection(turnInput.modelSelection)
+              ? yield* openQuery(turnInput, nativeThreadId, queryPolicy)
+              : undefined;
+            const effectiveSelection = autoQuery?.effectiveSelection ?? turnInput.modelSelection;
             const promptText = applyClaudePromptEffortPrefix(
               turnInput.message.text,
-              compileClaudeModelSelection(turnInput.modelSelection, modelCatalog).promptEffort,
+              compileClaudeModelSelection(effectiveSelection, modelCatalog).promptEffort,
             );
             const appContext = turnInput.appContext ?? [];
             const delivered = deliveredAppContext.get(nativeThreadId);
@@ -13436,26 +13809,42 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       uuid: promptUuid,
                     }).pipe(
                       Effect.map((message) => {
+                        const suppliedContext = appContext.filter(
+                          (entry) => delivered?.get(entry.key) !== entry.text,
+                        );
+                        const guidance = autoQuery?.querySession.adaptive?.agentGuidance;
                         const withContext = withClaudeAppContext(
                           message,
-                          appContext.filter((entry) => delivered?.get(entry.key) !== entry.text),
+                          guidance
+                            ? [...suppliedContext, { key: "t3_routing", text: guidance }]
+                            : suppliedContext,
                           pdfReservation,
                         );
-                        appContextSent = withContext !== message;
+                        appContextSent = suppliedContext.length > 0 && withContext !== message;
                         return withContext;
                       }),
                       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
                       Effect.provideService(Path.Path, path),
                     );
-            const querySession = yield* openQuery(turnInput, nativeThreadId, queryPolicy);
+            const { querySession } =
+              autoQuery ?? (yield* openQuery(turnInput, nativeThreadId, queryPolicy));
             yield* applySessionTitle(querySession.query, nativeThreadId, turnInput.appThread.title);
             const autoCompactWindow = yield* resolveAutoCompactWindow(
               querySession.settingsCwd,
-              turnInput.modelSelection,
+              effectiveSelection,
               querySession.launchArgSettings,
             );
             const context: ActiveClaudeTurnContext = {
-              input: turnInput,
+              input:
+                effectiveSelection === turnInput.modelSelection
+                  ? turnInput
+                  : { ...turnInput, modelSelection: effectiveSelection },
+              ...(querySession.adaptive === undefined
+                ? {}
+                : {
+                    adaptiveRoute: querySession.adaptive.route,
+                    routingAgentsUsed: new Set<string>(),
+                  }),
               autoCompactWindow,
               queryPolicy: querySession.queryPolicy,
               nativeThreadId,
@@ -13966,7 +14355,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             );
             // A selection sent with the steer applies to the running turn when the live process can switch to it.
             const steerSelection =
-              turnInput.modelSelection === undefined
+              turnInput.modelSelection === undefined ||
+              existing.adaptive !== undefined ||
+              usesAdaptiveSelection(turnInput.modelSelection)
                 ? undefined
                 : compileClaudeModelSelection(
                     turnInput.modelSelection,
@@ -14190,6 +14581,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           providerSession: session,
           getModelContextWindow: (selection) => claudeContextWindow(selection) ?? undefined,
+          supportsAdaptiveRouting: true,
           events: Stream.fromEffectRepeat(Queue.take(events)),
           backgroundTasksEndWithProcess: true,
           hasPendingBackgroundWork: Effect.gen(function* () {
@@ -14860,7 +15252,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
     hooks: Pick<
       ClaudeAdapterV2Options,
-      "scopedLimitNames" | "onUsageLimits" | "onSessionInit" | "modelCatalog" | "routeModelCatalog"
+      | "scopedLimitNames"
+      | "onUsageLimits"
+      | "onSessionInit"
+      | "modelCatalog"
+      | "routeModelCatalog"
+      | "routingUsageLimits"
     > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;

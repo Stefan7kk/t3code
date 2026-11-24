@@ -668,6 +668,7 @@ export interface RunExecutionServiceV2StartRootRunInput {
   ) => Effect.Effect<UnsettledWork, ProjectionStoreV2Error>;
   readonly message: ProviderAdapter.ProviderAdapterV2TurnMessage;
   readonly modelSelection: ModelSelection;
+  readonly adaptiveHistory?: ProviderAdapter.ProviderAdapterV2TurnInput["adaptiveHistory"];
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
 }
 
@@ -2230,6 +2231,9 @@ export const layer: Layer.Layer<
           message: input.message,
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,
+          ...(input.adaptiveHistory === undefined
+            ? {}
+            : { adaptiveHistory: input.adaptiveHistory }),
           ...(appContext.length === 0 ? {} : { appContext }),
         };
         // Check after the context read: ingestion can settle the run while

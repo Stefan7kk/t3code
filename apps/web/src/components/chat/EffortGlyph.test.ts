@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { ADAPTIVE_SELECTION } from "@t3tools/contracts";
 
 import { effortBarHeights, resolveEffortGlyph } from "./EffortGlyph";
 
@@ -30,6 +31,18 @@ describe("resolveEffortGlyph", () => {
     const reported = descriptor(["default", "low", "medium", "high", "xhigh", "max"]);
     expect(resolveEffortGlyph(reported, "default")?.special).toBe("Default");
     expect(resolveEffortGlyph(reported, "low")).toMatchObject({ count: 4, filled: 1 });
+  });
+
+  it("names Auto and leaves the manual reasoning scale intact", () => {
+    const base = descriptor([ADAPTIVE_SELECTION, "low", "medium", "high", "max"]);
+    const withAuto = {
+      ...base,
+      options: base.options.map((option) =>
+        option.id === ADAPTIVE_SELECTION ? { ...option, label: "Auto" } : option,
+      ),
+    };
+    expect(resolveEffortGlyph(withAuto, ADAPTIVE_SELECTION)?.special).toBe("Auto");
+    expect(resolveEffortGlyph(withAuto, "medium")).toMatchObject({ count: 3, filled: 2 });
   });
 
   it("names Ultracode and Ultrathink instead of drawing a level", () => {

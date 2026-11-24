@@ -556,6 +556,12 @@ export interface ProviderAdapterV2TurnInput {
   readonly message: ProviderAdapterV2TurnMessage;
   /** Leading characters of `message.text` that are inline handoff context, not the user's words. */
   readonly inlineContextLength?: number;
+  readonly adaptiveHistory?: {
+    readonly failureCount: number;
+    readonly tokens: number;
+    readonly previousSelection?: ModelSelection;
+    readonly taskText?: string;
+  };
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
@@ -702,6 +708,7 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly driver: ProviderDriverKind;
   readonly providerSessionId: ProviderSessionId;
   readonly providerSession: OrchestrationV2ProviderSession;
+  readonly supportsAdaptiveRouting?: true;
   /** False keeps conversations alive when the provider cannot restore them after a restart. */
   readonly canResumeAfterRestart?: boolean;
   readonly events: Stream.Stream<ProviderAdapterV2Event, ProviderAdapterV2Error>;

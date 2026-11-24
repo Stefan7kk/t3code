@@ -57,6 +57,7 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { AdaptiveRoute } from "./model.ts";
 import { ThreadIssueKey, ThreadIssueLink, ThreadIssueLinkSource } from "./issue.ts";
 import {
   ThreadLinkedPullRequest,
@@ -1284,6 +1285,7 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
   turnTokenUsage: Schema.optional(TurnTokenUsage),
+  adaptiveRoute: Schema.optional(AdaptiveRoute),
   /** The model the provider reported running this turn's root agent, which can differ from the requested one. */
   model: Schema.optional(TrimmedNonEmptyString),
 });
