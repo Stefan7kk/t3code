@@ -63,6 +63,7 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { mcpToolResultOutput } from "@t3tools/shared/toolOutput";
 import type {
   AdaptiveModelTier,
+  AdaptiveRoute,
   ChatAttachment,
   OrchestrationV2AppThread,
   OrchestrationV2ConversationMessage,
@@ -1287,6 +1288,7 @@ function failureResetAt(
 }
 
 interface ActiveCodexTurnContext {
+  adaptiveRoute?: AdaptiveRoute;
   hookStopReason?: string;
   appliedServiceTier?: string;
   capacityRetryAttempt?: number;
@@ -2175,6 +2177,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             context.nativeTurnId,
           ).hasSubagents = true;
         };
+        // Keyed by turn input: the root turn context is built from it after turn/start returns.
+        const adaptiveRoutes = new WeakMap<
+          ProviderAdapter.ProviderAdapterV2TurnInput,
+          AdaptiveRoute
+        >();
         const pendingRootTurns = yield* Ref.make(
           new Map<string, ProviderAdapter.ProviderAdapterV2TurnInput>(),
         );
@@ -2542,6 +2549,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             runningCompactionItemIds: new Set(),
             runningWebSearchItems: new Map(),
           };
+          const adaptiveRoute = adaptiveRoutes.get(input.turnInput);
+          if (adaptiveRoute !== undefined) context.adaptiveRoute = adaptiveRoute;
           const nativeThreadId = input.turnInput.providerThread.nativeThreadRef?.nativeId;
           const continuation =
             nativeThreadId == null ? undefined : capacityContinuations.get(nativeThreadId);
@@ -2593,6 +2602,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               status: "running",
               startedAt: input.startedAt,
               completedAt: null,
+              ...(adaptiveRoute === undefined ? {} : { adaptiveRoute }),
             },
           });
           yield* rememberRootProviderThread(input.turnInput.providerThread);
@@ -6935,6 +6945,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 status: input.status,
                 startedAt: input.context.startedAt,
                 completedAt: input.completedAt,
+                ...(input.context.adaptiveRoute === undefined
+                  ? {}
+                  : { adaptiveRoute: input.context.adaptiveRoute }),
                 turnTokenUsage: completeCodexTurnTokenUsage(
                   usageStateForThread(
                     input.context.providerThread.nativeThreadRef?.nativeId ??
@@ -7658,6 +7671,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 });
               }
               effectiveSelection = decision.selection;
+              adaptiveRoutes.set(turnInput, decision.route);
             }
             const configuredReasoningSummary = yield* client
               .request("config/read", { cwd: turnInput.runtimePolicy.cwd, includeLayers: false })

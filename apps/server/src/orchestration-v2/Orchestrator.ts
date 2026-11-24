@@ -213,6 +213,13 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import {
+  autoProviderSelection,
+  chooseAutoProvider,
+  isAutoProviderSelection,
+} from "@t3tools/provider-core/server/autoProvider";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -7402,6 +7409,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       projection = applyToProjection(projection, event);
     }
     let modelSelection = command.modelSelection ?? projection.thread.modelSelection;
+    if (isAutoProviderSelection(modelSelection)) {
+      // Resolved to a concrete provider before anything is persisted or sent, so the existing
+      // provider-switch path below plans and delivers the (summary-only) context handoff.
+      const registry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+      const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+      const choice = Option.isNone(registry)
+        ? { error: "Auto provider is unavailable on this server." }
+        : chooseAutoProvider({
+            providers: yield* registry.value.getProviders,
+            allowlist: resolveProjectSettings(settings, projection.thread.projectId).settings
+              .autoProviderAllowlist,
+            currentInstanceId: projection.thread.providerInstanceId,
+            nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+          });
+      if ("error" in choice) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: choice.error,
+        });
+      }
+      if (choice.switched) {
+        yield* Effect.logInfo("Auto provider switching provider", {
+          threadId: command.threadId,
+          from: projection.thread.providerInstanceId,
+          to: choice.instanceId,
+          reason: choice.reason,
+        });
+      }
+      modelSelection = autoProviderSelection(choice.instanceId);
+    }
     let dispatchMode = resolveMessageDispatchIntent(
       projection,
       command.dispatchMode,
@@ -7582,7 +7620,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         target !== undefined &&
         isActiveRun(target) &&
-        target.providerInstanceId !== command.modelSelection.instanceId &&
+        target.providerInstanceId !== modelSelection.instanceId &&
         !(yield* stopReachedRun(command, command.threadId, target.id))
       ) {
         // Before the provider session starts, the adapter's capabilities stand in for its own.

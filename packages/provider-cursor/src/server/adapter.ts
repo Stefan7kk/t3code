@@ -2342,6 +2342,9 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           status: input.status,
           startedAt: input.context.startedAt,
           completedAt: input.completedAt,
+          ...(input.context.input.adaptiveRoute === undefined
+            ? {}
+            : { adaptiveRoute: input.context.input.adaptiveRoute }),
           ...(input.tokenUsage === undefined ? {} : { tokenUsage: input.tokenUsage }),
           ...(input.completedAt === null || input.context.usage === undefined
             ? {}
@@ -2726,7 +2729,11 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                   detail: decision.error,
                 });
               }
-              turnInput = { ...requestedTurnInput, modelSelection: decision.selection };
+              turnInput = {
+                ...requestedTurnInput,
+                modelSelection: decision.selection,
+                adaptiveRoute: decision.route,
+              };
             }
             const agentId = nativeThreadId(turnInput.providerThread);
             const agent = yield* openAgent({

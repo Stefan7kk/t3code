@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 
 import {
+  type AdaptiveRoute,
   type ChatAttachment,
   type ModelSelection,
   type OrchestrationV2ConversationMessage,
@@ -462,7 +463,10 @@ export interface AcpAdapterV2Flavor {
    */
   readonly resolveAdaptiveSelection?: (
     turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
-  ) => Effect.Effect<{ readonly selection: ModelSelection } | { readonly error: string }>;
+  ) => Effect.Effect<
+    | { readonly selection: ModelSelection; readonly route?: AdaptiveRoute }
+    | { readonly error: string }
+  >;
   /**
    * The agent advertises its model option only after `session/new` returns
    * (Kiro sends it in a `config_option_update`), so in-session model switching
@@ -8378,6 +8382,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           status,
           startedAt: context.startedAt,
           completedAt,
+          ...(context.input.adaptiveRoute === undefined
+            ? {}
+            : { adaptiveRoute: context.input.adaptiveRoute }),
           ...(status === "running" || status === "pending"
             ? {}
             : {
@@ -9165,7 +9172,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   detail: decision.error,
                 });
               }
-              turnInput = { ...requestedTurnInput, modelSelection: decision.selection };
+              turnInput = {
+                ...requestedTurnInput,
+                modelSelection: decision.selection,
+                ...(decision.route === undefined ? {} : { adaptiveRoute: decision.route }),
+              };
             }
             yield* awaitRuntimeTeardown();
             const existing = yield* Ref.get(activeTurn);

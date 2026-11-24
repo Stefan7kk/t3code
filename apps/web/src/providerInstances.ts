@@ -1,22 +1,27 @@
 import { pipe } from "effect/Function";
 import {
+  ADAPTIVE_SELECTION,
+  AUTO_PROVIDER_INSTANCE_ID,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
   type ProjectId,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
   type ServerSettings,
   type ServerProviderState,
 } from "@t3tools/contracts";
+import { msg } from "gt-react";
+
 import {
   normalizeProviderAccentColor,
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import { m } from "./i18n/messages";
 
 export { normalizeProviderAccentColor, shouldShowInstanceBadge };
 
@@ -83,6 +88,61 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
 
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
   return entry.enabled;
+}
+
+const AUTO_PROVIDER_DRIVER = ProviderDriverKind.make("auto");
+
+/** Picker row for the server-side Auto provider. Absent until some enabled provider advertises Auto. */
+export function withAutoProviderEntry(
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+): ReadonlyArray<ProviderInstanceEntry> {
+  const instanceId = ProviderInstanceId.make(AUTO_PROVIDER_INSTANCE_ID);
+  if (entries.some((entry) => entry.instanceId === instanceId)) return entries;
+  const supportsAuto = entries.some(
+    (entry) =>
+      entry.enabled &&
+      entry.isAvailable &&
+      entry.models.some((model) => model.slug === ADAPTIVE_SELECTION),
+  );
+  if (!supportsAuto) return entries;
+  const snapshot = {
+    instanceId,
+    driver: AUTO_PROVIDER_DRIVER,
+    displayName: m(msg("Auto")),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated", label: m(msg("Allowlisted subscriptions")) },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    availability: "available",
+    models: [
+      {
+        slug: ADAPTIVE_SELECTION,
+        name: m(msg("Auto")),
+        isCustom: false,
+        isDefault: true,
+        capabilities: null,
+      },
+    ],
+    slashCommands: [],
+    skills: [],
+  } as ServerProvider;
+  return [
+    {
+      instanceId,
+      driverKind: AUTO_PROVIDER_DRIVER,
+      displayName: m(msg("Auto")),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      isDefault: false,
+      isAvailable: true,
+      snapshot,
+      models: snapshot.models,
+    },
+    ...entries,
+  ];
 }
 
 export function deriveProviderInstanceEntries(

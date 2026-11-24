@@ -57,11 +57,13 @@ describe("resolveProjectSettings", () => {
       defaultAutoPull: true,
       sidebarAutoSettleAfterDays: 3,
       routingProfile: "performance",
+      autoProviderAllowlist: [ProviderInstanceId.make("codex")],
       projectSettingsOverrides: {
         [projectId]: {
           defaultAutoPull: false,
           sidebarAutoSettleAfterDays: null,
           routingProfile: "economy",
+          autoProviderAllowlist: [ProviderInstanceId.make("claude")],
         },
       },
     });
@@ -78,6 +80,11 @@ describe("resolveProjectSettings", () => {
       "performance",
     );
     expect(DEFAULT_SERVER_SETTINGS.routingProfile).toBe("balanced");
+    expect(resolved.settings.autoProviderAllowlist).toEqual(["claude"]);
+    expect(resolveProjectSettings(settings, otherProjectId).settings.autoProviderAllowlist).toEqual(
+      ["codex"],
+    );
+    expect(DEFAULT_SERVER_SETTINGS.autoProviderAllowlist).toEqual([]);
   });
 
   it("honours the aggregate's own fields only until the server has folded them", () => {

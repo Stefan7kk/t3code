@@ -1208,6 +1208,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "routingProfile",
   "routingMaxTier",
   "routingTokenBudget",
+  "autoProviderAllowlist",
   "speechProjectCustomWords",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
@@ -1249,6 +1250,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   routingProfile: Schema.optionalKey(RoutingProfile),
   routingMaxTier: Schema.optionalKey(AdaptiveModelTier),
   routingTokenBudget: Schema.optionalKey(RoutingTokenBudget),
+  autoProviderAllowlist: Schema.optionalKey(Schema.Array(ProviderInstanceId)),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
@@ -1406,6 +1408,10 @@ export const ServerSettings = Schema.Struct({
   ),
   routingTokenBudget: RoutingTokenBudget.pipe(
     Schema.withDecodingDefault(Effect.succeed("unlimited" as const)),
+  ),
+  /** Provider instances Auto provider may send project context to. Empty means only enabled, signed-in ones. */
+  autoProviderAllowlist: Schema.Array(ProviderInstanceId).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
   ),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
@@ -1881,6 +1887,7 @@ export const ServerSettingsPatch = Schema.Struct({
   routingProfile: Schema.optionalKey(RoutingProfile),
   routingMaxTier: Schema.optionalKey(AdaptiveModelTier),
   routingTokenBudget: Schema.optionalKey(RoutingTokenBudget),
+  autoProviderAllowlist: Schema.optionalKey(Schema.Array(ProviderInstanceId)),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   keepAwakeWhileAgentsWork: Schema.optionalKey(Schema.Boolean),

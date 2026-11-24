@@ -161,6 +161,15 @@ describe("makeQwenAdaptiveResolver", () => {
           model: "qwen3.8-flash(openai)",
           options: [{ id: "reasoning_effort", value: "low" }],
         },
+        // The route is what the adapter records on the provider turn.
+        route: {
+          tier: "economy",
+          reason: "Lookup",
+          requestedModel: "qwen3.8-flash(openai)",
+          requestedEffort: "low",
+          effortOptionId: "reasoning_effort",
+          failureCount: 0,
+        },
       });
     }),
   );

@@ -5066,6 +5066,10 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
               if (stagedReverts.has(sessionId)) yield* clearRevert(sessionId);
               yield* prepareTurn(sessionId, state, turnInput);
               const turn = yield* begin;
+              if ("route" in decision) {
+                turn.providerTurn = { ...turn.providerTurn, adaptiveRoute: decision.route };
+                yield* emitProviderTurn(state, turn, turn.providerTurn);
+              }
               turn.unsent = true;
               yield* lock.withPermit(takeRunningWake(state));
               return { state, sessionId, turn };
