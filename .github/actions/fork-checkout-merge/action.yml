@@ -1,0 +1,52 @@
+name: Fork checkout and upstream merge
+description: >
+  Checks out the pinned fork main commit and, when an upstream stable tag is given, merges it.
+  A merge conflict fails the job so nothing downstream can build or publish.
+inputs:
+  main-sha:
+    description: Fork main commit the release was planned against.
+    required: true
+  upstream-tag:
+    description: Official stable tag to merge (vX.Y.Z). Empty skips the merge.
+    required: false
+    default: ""
+  upstream-repo:
+    description: Official upstream repository.
+    required: false
+    default: pingdotgg/t3code
+  push-merged:
+    description: Push the merge commit to fork main (release job only).
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Checkout fork main
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      with:
+        ref: ${{ inputs.main-sha }}
+        fetch-depth: 0
+        persist-credentials: ${{ inputs.push-merged == 'true' }}
+
+    - name: Merge upstream stable
+      if: inputs.upstream-tag != ''
+      shell: bash
+      env:
+        UPSTREAM_TAG: ${{ inputs.upstream-tag }}
+        UPSTREAM_REPO: ${{ inputs.upstream-repo }}
+        PUSH_MERGED: ${{ inputs.push-merged }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Refusing non-stable upstream tag: $UPSTREAM_TAG"
+          exit 1
+        fi
+        git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+        git fetch --no-tags upstream "+refs/tags/${UPSTREAM_TAG}:refs/tags/upstream/${UPSTREAM_TAG}"
+        git config user.name "t3-fork-release-bot"
+        git config user.email "actions@users.noreply.github.com"
+        git merge --no-ff "upstream/${UPSTREAM_TAG}" \
+          -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
+        if [[ "$PUSH_MERGED" == "true" ]]; then
+          git push origin "HEAD:refs/heads/main"
+        fi

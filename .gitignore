@@ -50,4 +50,10 @@ node_modules/
 # pnpm content-addressable store; never belongs in the repo.
 .pnpm-store/
 
+# Local application state must never enter the fork: databases, WAL sidecars, backups.
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+backups/
+
 /packages/ssh/.ssh-launcher-test-*/

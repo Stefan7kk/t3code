@@ -1,0 +1,365 @@
+# Enhanced fork release pipeline.
+#
+# Every 6 hours (and on demand) this workflow:
+#   1. detects a newer official STABLE release of pingdotgg/t3code,
+#   2. merges it into our patch series (conflicts abort everything),
+#   3. runs the secret-scanning, lint, typecheck and full regression gates,
+#   4. builds the Windows x64 NSIS installer with the fork update feed,
+#   5. publishes a GitHub Release the native desktop updater can offer.
+#
+# Custom feature releases (release-current) ship our current main without waiting for upstream,
+# using 0.1.(patch+1)-fork.N versions that sort below the next official stable.
+#
+# Security posture: least-privilege per-job permissions, actions pinned by SHA, frozen lockfile,
+# no repository secrets beyond the scoped GITHUB_TOKEN, mandatory gitleaks gates, and release
+# integrity verification (sha512 in latest.yml must match the installer) before publishing.
+name: Fork Release
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: sync-upstream merges the newest official stable; release-current ships our main as a fork release.
+        type: choice
+        options:
+          - sync-upstream
+          - release-current
+        default: sync-upstream
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: pingdotgg/t3code
+  GITLEAKS_VERSION: "8.24.3"
+
+jobs:
+  detect:
+    name: Detect release intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should_release: ${{ steps.intent.outputs.should_release }}
+      mode: ${{ steps.intent.outputs.mode }}
+      version: ${{ steps.intent.outputs.version }}
+      upstream_tag: ${{ steps.intent.outputs.upstream_tag }}
+      main_sha: ${{ steps.intent.outputs.main_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release intent
+        id: intent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_MODE: ${{ inputs.mode || 'sync-upstream' }}
+        run: |
+          set -euo pipefail
+          main_sha="$(git rev-parse HEAD)"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "+refs/tags/v*:refs/tags/upstream/v*"
+          # Official stable tags only: plain vX.Y.Z, never nightly/preview/prerelease suffixes.
+          upstream_latest="$(git tag -l 'upstream/v*' \
+            | sed 's|^upstream/||' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n 1 || true)"
+          our_tags="$(gh release list --limit 200 --json tagName --jq '.[].tagName' | tr '\n' ',' | sed 's/,$//')"
+          latest_plain="$(node -e "
+            import('./scripts/fork/forkVersion.mjs').then((m) => {
+              const tags = process.argv[1].split(',').filter(Boolean);
+              const latest = m.latestPlainVersion(tags);
+              console.log(latest ? m.formatVersion(latest) : '');
+            });
+          " "$our_tags")"
+          mode="$INPUT_MODE"
+          version=""
+          upstream_tag=""
+          should_release=false
+          if [[ "$mode" == "sync-upstream" ]]; then
+            if [[ -n "$upstream_latest" ]]; then
+              newer="$(node -e "
+                import('./scripts/fork/forkVersion.mjs').then((m) => {
+                  const a = m.parseVersion(process.argv[1]);
+                  const b = m.parseVersion(process.argv[2] || '0.0.0');
+                  console.log(a && m.compareVersions(a, b) > 0 ? 'yes' : 'no');
+                });
+              " "$upstream_latest" "$latest_plain")"
+              if [[ "$newer" == "yes" ]]; then
+                version="${upstream_latest#v}"
+                upstream_tag="$upstream_latest"
+                should_release=true
+              fi
+            fi
+          else
+            if [[ -z "$latest_plain" ]]; then
+              echo "::error::release-current needs at least one plain fork release recording the upstream base."
+              exit 1
+            fi
+            version="$(node scripts/fork/forkVersion.mjs next --base "$latest_plain" --tags "$our_tags")"
+            should_release=true
+          fi
+          if [[ "$should_release" == "true" && ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-fork\.[0-9]+)?$ ]]; then
+            echo "::error::Computed version is not a valid fork release version."
+            exit 1
+          fi
+          {
+            echo "should_release=$should_release"
+            echo "mode=$mode"
+            echo "version=$version"
+            echo "upstream_tag=$upstream_tag"
+            echo "main_sha=$main_sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "mode=$mode version=$version upstream_tag=$upstream_tag should_release=$should_release"
+
+  gate:
+    name: Merge, secret scan, regression tests
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout and merge
+        uses: ./.github/actions/fork-checkout-merge
+        with:
+          main-sha: ${{ needs.detect.outputs.main_sha }}
+          upstream-tag: ${{ needs.detect.outputs.upstream_tag }}
+
+      - name: Secret scan (full history and working tree)
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "$archive"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o checksums.txt
+          grep " ${archive}\$" checksums.txt | sha256sum -c -
+          tar -xzf "$archive" gitleaks
+          # History scan covers every committed file, including the upstream merge. The audited
+          # baseline ignores only the reviewed upstream-public fixture findings; anything new fails.
+          ./gitleaks git . --log-opts="--all" --redact --no-banner --exit-code 1 \
+            -b .gitleaks-baseline.json
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --frozen-lockfile
+
+      - name: Install browser test runtime
+        run: |
+          node apps/web/node_modules/playwright/cli.js install --only-shell chromium
+          node apps/web/node_modules/playwright/cli.js install-deps chromium
+
+      - name: Fork versioning tests
+        run: node --test scripts/fork/forkVersion.test.mjs
+
+      - name: Lint
+        run: vp run lint
+
+      - name: Typecheck
+        run: vp run typecheck
+
+      - name: Regression tests
+        run: vp run test
+
+  cli-archive:
+    name: Linux CLI archive (WSL runtime)
+    needs: [detect, gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout and merge
+        uses: ./.github/actions/fork-checkout-merge
+        with:
+          main-sha: ${{ needs.detect.outputs.main_sha }}
+          upstream-tag: ${{ needs.detect.outputs.upstream_tag }}
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --frozen-lockfile
+
+      - name: Build CLI archive
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/build-cli-archive.ts \
+            --platform linux --arch x64 \
+            --version "$VERSION" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "$VERSION"
+
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-linux-x64
+          path: release-cli/*
+          if-no-files-found: error
+          compression-level: 0
+
+  build-publish:
+    name: Build Windows installer and publish
+    needs: [detect, gate, cli-archive]
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout, merge and push
+        uses: ./.github/actions/fork-checkout-merge
+        with:
+          main-sha: ${{ needs.detect.outputs.main_sha }}
+          upstream-tag: ${{ needs.detect.outputs.upstream_tag }}
+          push-merged: "true"
+
+      - name: Download CLI archive
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cli-linux-x64
+          path: release-cli
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --frozen-lockfile
+
+      - name: Ensure Electron runtime
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Enable T3 Connect public configuration
+        shell: bash
+        run: cp .env.example .env
+
+      - name: Build Windows NSIS installer
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          wsl_runtime="$(ls release-cli/t3-*-linux-x64.tar.gz | head -n 1)"
+          node scripts/build-desktop-artifact.ts \
+            --platform win --target nsis --arch x64 \
+            --build-version "$VERSION" \
+            --wsl-runtime "$wsl_runtime" \
+            --output-dir release
+
+      - name: Verify release assets and integrity
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          set -euo pipefail
+          exe="release/T3-Code-${VERSION}-x64.exe"
+          test -f "$exe"
+          test -f release/latest.yml
+          ls release/*.blockmap
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const yaml = fs.readFileSync('release/latest.yml', 'utf8');
+            const sha512 = /sha512: (\S+)/.exec(yaml)[1];
+            const size = Number(/size: (\d+)/.exec(yaml)[1]);
+            const bytes = fs.readFileSync(process.argv[1]);
+            const actual = crypto.createHash('sha512').update(bytes).digest('base64');
+            if (actual !== sha512 || bytes.length !== size) {
+              console.error('latest.yml does not match the installer');
+              process.exit(1);
+            }
+            console.log('release integrity OK');
+          " "$exe"
+
+      - name: Secret scan release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_windows_x64.zip"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "$archive"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o checksums.txt
+          grep " ${archive}\$" checksums.txt | sha256sum -c -
+          unzip -o "$archive" gitleaks.exe
+          ./gitleaks.exe dir release --redact --no-banner --exit-code 1
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+          UPSTREAM_TAG: ${{ needs.detect.outputs.upstream_tag }}
+          MODE: ${{ needs.detect.outputs.mode }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Enhanced fork of pingdotgg/t3code — NOT an official signed T3 Tools release."
+            echo
+            if [[ "$MODE" == "sync-upstream" ]]; then
+              echo "Upstream base: ${UPSTREAM_TAG} (official stable), merged with the fork patch series."
+            else
+              echo "Custom feature release on the current fork base."
+            fi
+            echo
+            echo "Fork features: Claude Auto model/effort routing, Alibaba Token Plan quota monitoring,"
+            echo "update session interlock, pre-install state backups. Unsigned build; the updater feed"
+            echo "points at this repository."
+            echo
+            echo "Rollback: keep the previous installer; pre-update state backups live in userdata/backups."
+          } > release-notes.md
+          sha256sum release/T3-Code-"$VERSION"-x64.exe release/latest.yml release/*.blockmap > release/SHA256SUMS
+          gh release create "v${VERSION}" \
+            --title "T3 Code Enhanced ${VERSION} (fork)" \
+            --notes-file release-notes.md \
+            --latest \
+            --target "$(git rev-parse HEAD)" \
+            release/T3-Code-"$VERSION"-x64.exe \
+            release/latest.yml \
+            release/*.blockmap \
+            release/SHA256SUMS
+
+  notify-failure:
+    name: Report pipeline failure
+    needs: [detect, gate, cli-archive, build-publish]
+    if: failure() && needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open failure issue
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const version = process.env.VERSION || 'unknown';
+            const mode = process.env.MODE || 'unknown';
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Fork release pipeline failed (${mode} ${version})`,
+              body: [
+                'The fork release pipeline stopped before publishing. No update was deployed.',
+                '',
+                `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+                '',
+                'Common causes: upstream merge conflict, secret-scan finding, lint/typecheck/test',
+                'failure, or build failure. Resolve and re-run the workflow manually.',
+              ].join('\n'),
+            });
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          MODE: ${{ needs.detect.outputs.mode }}
