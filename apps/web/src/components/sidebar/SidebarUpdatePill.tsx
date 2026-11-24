@@ -13,6 +13,7 @@ import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { usePrimaryManagedPolicy } from "../../state/managedPolicy";
+import { useAnyThreadRunning } from "../../state/threads";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   canCheckForUpdate,
@@ -236,11 +237,12 @@ function SidebarUpdateControl() {
 
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
   const isDownloading = state?.status === "downloading";
+  const sessionsActive = useAnyThreadRunning();
   const localUpdateVersion =
     state && action !== "none" ? getDesktopUpdateDownloadedVersion(state) : null;
   const everything = useUpdateEverything(localUpdateVersion);
   const checkProviderUpdates = useCheckProviderUpdates();
-  const runsEverything = everything.hasUpdates && !isDownloading;
+  const runsEverything = everything.hasUpdates && !isDownloading && !sessionsActive;
   const run = useUpdateEverythingRun();
   const isRunningEverything = run !== null;
   const showCheckIcon = shouldShowDesktopUpdateCheckIcon({
@@ -263,7 +265,7 @@ function SidebarUpdateControl() {
     ? everything.summary
     : showUpdateDetails
       ? state
-        ? getDesktopUpdateButtonTooltip(state, messages)
+        ? getDesktopUpdateButtonTooltip(state, messages, sessionsActive)
         : gt("Update available")
       : showCheckIcon
         ? gt("Checking for updates…")
@@ -273,7 +275,7 @@ function SidebarUpdateControl() {
     : runsEverything
       ? false
       : showUpdateDetails
-        ? isDesktopUpdateButtonDisabled(state)
+        ? isDesktopUpdateButtonDisabled(state, sessionsActive)
         : !canCheckForUpdate(state);
   const isInteractionDisabled = disabled || isActionPending || isRunningEverything;
   const showReleaseNotesPopover =
@@ -382,7 +384,7 @@ function SidebarUpdateControl() {
                 downloadLocalUpdate(bridge, { notifyDownloaded: false, reportError }),
             }
           : {}),
-        ...(bridge && action !== "none"
+        ...(bridge && action !== "none" && !sessionsActive
           ? { installLocal: (reportError) => installLocalUpdate(bridge, reportError) }
           : {}),
       }),

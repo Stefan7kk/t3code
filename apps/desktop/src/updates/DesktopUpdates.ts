@@ -19,6 +19,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -39,6 +40,7 @@ import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
+import { snapshotStateDatabase } from "./UpdateStateBackup.ts";
 import {
   normalizeDesktopUpdateReleaseNotes,
   releaseNotesOfOfferedVersion,
@@ -927,6 +929,23 @@ export const make = Effect.gen(function* () {
             ],
             { concurrency: "unbounded" },
           );
+          // Backends are stopped, so the database is closed and the snapshot is consistent.
+          // A failed backup aborts the install rather than risking an unrecoverable downgrade.
+          const backup = yield* Effect.result(
+            snapshotStateDatabase({
+              stateDir: environment.stateDir,
+              targetVersion: downloadedVersion ?? "unknown",
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, environment.path),
+            ),
+          );
+          if (backup._tag === "Failure") {
+            yield* recoverFailedInstall(
+              "Could not back up application state before installing the update.",
+            );
+            return { accepted: true, completed: false, failed: true };
+          }
           yield* electronUpdater.quitAndInstall({
             isSilent: true,
             isForceRunAfter: true,

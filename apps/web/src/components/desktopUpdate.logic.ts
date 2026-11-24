@@ -72,8 +72,14 @@ export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | nul
   return state?.hostArch === "arm64" && state.appArch === "x64";
 }
 
-export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
-  return state?.status === "downloading";
+export function isDesktopUpdateButtonDisabled(
+  state: DesktopUpdateState | null,
+  sessionsActive = false,
+): boolean {
+  return (
+    state?.status === "downloading" ||
+    (sessionsActive && state !== null && resolveDesktopUpdateButtonAction(state) === "install")
+  );
 }
 
 export function getArm64IntelBuildWarningDescription(
@@ -109,7 +115,13 @@ export function getArm64IntelBuildWarningDescription(
 export function getDesktopUpdateButtonTooltip(
   state: DesktopUpdateState,
   resolve: MessageResolver = m,
+  sessionsActive = false,
 ): string {
+  if (sessionsActive && resolveDesktopUpdateButtonAction(state) === "install") {
+    return resolve(
+      msg("A coding session is running. Finish or stop it before installing the update."),
+    );
+  }
   if (
     state.notAppliedVersion !== undefined &&
     (state.status === "available" || state.status === "downloaded") &&

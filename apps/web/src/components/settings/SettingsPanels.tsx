@@ -71,6 +71,7 @@ import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettin
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { managedTelemetryOffMessage, usePrimaryManagedPolicy } from "../../state/managedPolicy";
+import { useAnyThreadRunning } from "../../state/threads";
 import {
   getTextGenerationModelOptionsByInstance,
   resolveAppModelSelectionState,
@@ -215,6 +216,8 @@ function AboutVersionSection() {
         ),
     ).length;
 
+  const sessionsActive = useAnyThreadRunning();
+
   const handleButtonClick = async () => {
     const bridge = window.desktopBridge;
     if (!bridge) return;
@@ -228,6 +231,18 @@ function AboutVersionSection() {
 
     if (action === "install") {
       if (isUpdateActionPending) return;
+      if (sessionsActive) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: gt("Could not install update"),
+            description: gt(
+              "A coding session is running. Finish or stop it before installing the update.",
+            ),
+          }),
+        );
+        return;
+      }
       setIsUpdateActionPending(true);
       let confirmed = false;
       try {
@@ -306,11 +321,13 @@ function AboutVersionSection() {
   };
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
-  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState, messages) : null;
+  const buttonTooltip = updateState
+    ? getDesktopUpdateButtonTooltip(updateState, messages, sessionsActive)
+    : null;
   const buttonDisabled =
     action === "none"
       ? !canCheckForUpdate(updateState)
-      : isDesktopUpdateButtonDisabled(updateState);
+      : isDesktopUpdateButtonDisabled(updateState, sessionsActive);
 
   const actionLabel: Record<string, string> = { download: gt("Download"), install: gt("Install") };
   const statusLabel: Record<string, string> = {

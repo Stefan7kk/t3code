@@ -131,3 +131,17 @@ export const runningThreadKeepAliveAtom = createRunningThreadKeepAliveAtom({
   threadsAtom: environmentThreadShells.environmentThreadsAtom,
   stateAtom: environmentThreads.stateAtom,
 });
+
+/** True while any enabled environment has a preparing/queued/starting/running thread. */
+export const anyThreadRunningAtom = Atom.make((get) => {
+  const catalog = get(environmentCatalog.catalogValueAtom);
+  for (const environmentId of enabledEnvironmentIds(catalog)) {
+    const threads = get(environmentThreadShells.environmentThreadsAtom(environmentId));
+    if (threads.some((thread) => isRunning(thread.status))) return true;
+  }
+  return false;
+}).pipe(Atom.withLabel("web-any-thread-running"));
+
+export function useAnyThreadRunning(): boolean {
+  return useAtomValue(anyThreadRunningAtom);
+}

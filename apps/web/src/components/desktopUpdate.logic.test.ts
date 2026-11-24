@@ -6,6 +6,7 @@ import {
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateReleaseUrl,
+  isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "./desktopUpdate.logic";
 
@@ -92,6 +93,46 @@ describe("desktop update button state", () => {
       downloadPercent: 100,
     };
     expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
+  });
+});
+
+describe("desktop update session interlock", () => {
+  const downloadedState: DesktopUpdateState = {
+    ...baseState,
+    status: "downloaded",
+    availableVersion: "1.1.0",
+    downloadedVersion: "1.1.0",
+  };
+
+  it("blocks installing while a coding session is running", () => {
+    expect(resolveDesktopUpdateButtonAction(downloadedState)).toBe("install");
+    expect(isDesktopUpdateButtonDisabled(downloadedState, true)).toBe(true);
+    expect(getDesktopUpdateButtonTooltip(downloadedState, undefined, true)).toBe(
+      "A coding session is running. Finish or stop it before installing the update.",
+    );
+  });
+
+  it("keeps the normal install affordance when no session is running", () => {
+    expect(isDesktopUpdateButtonDisabled(downloadedState, false)).toBe(false);
+    expect(getDesktopUpdateButtonTooltip(downloadedState, undefined, false)).toBe(
+      "Update 1.1.0 downloaded. Click to restart and install.",
+    );
+  });
+
+  it("still allows downloading while a session is running", () => {
+    const availableState: DesktopUpdateState = {
+      ...baseState,
+      status: "available",
+      availableVersion: "1.1.0",
+    };
+    expect(isDesktopUpdateButtonDisabled(availableState, true)).toBe(false);
+    expect(getDesktopUpdateButtonTooltip(availableState, undefined, true)).toBe(
+      "Update 1.1.0 ready to download",
+    );
+  });
+
+  it("tolerates a missing update state", () => {
+    expect(isDesktopUpdateButtonDisabled(null, true)).toBe(false);
   });
 });
 
