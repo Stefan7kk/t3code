@@ -23,6 +23,14 @@
       "types": "./src/server/autoProvider.ts",
       "import": "./src/server/autoProvider.ts"
     },
+    "./server/adaptiveStats": {
+      "types": "./src/server/adaptiveStats.ts",
+      "import": "./src/server/adaptiveStats.ts"
+    },
+    "./server/delegationGuard": {
+      "types": "./src/server/delegationGuard.ts",
+      "import": "./src/server/delegationGuard.ts"
+    },
     "./server/adaptiveRouting": {
       "types": "./src/server/adaptiveRouting.ts",
       "import": "./src/server/adaptiveRouting.ts"
