@@ -100,4 +100,29 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         ).toBe("custom");
       }),
   );
+
+  it.effect("keeps API billing env unless T3CODE_PREFER_CLAUDE_SUBSCRIPTION is set", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const homePath = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-home-" });
+      const host = {
+        ANTHROPIC_API_KEY: "sk-test",
+        ANTHROPIC_BASE_URL: "https://example.invalid",
+        KEEP: "1",
+      };
+      expect(yield* mergeClaudeProcessEnvironment({ homePath }, undefined, host)).toMatchObject({
+        ANTHROPIC_API_KEY: "sk-test",
+        ANTHROPIC_BASE_URL: "https://example.invalid",
+        KEEP: "1",
+      });
+      const preferred = yield* mergeClaudeProcessEnvironment({ homePath }, undefined, {
+        ...host,
+        T3CODE_PREFER_CLAUDE_SUBSCRIPTION: "1",
+      });
+      expect(preferred.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(preferred.ANTHROPIC_BASE_URL).toBeUndefined();
+      expect(preferred.KEEP).toBe("1");
+      expect(preferred.T3CODE_PREFER_CLAUDE_SUBSCRIPTION).toBe("1");
+    }),
+  );
 });

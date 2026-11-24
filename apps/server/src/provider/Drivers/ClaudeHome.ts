@@ -63,6 +63,37 @@ const CLAUDE_HOST_SESSION_VARIABLES = [
 ];
 
 /**
+ * API-billing credentials outrank a Claude Pro/Max/Ultra login. When a host (or nested agent)
+ * injects them, Claude bills the key and can 403 even though a subscription is signed in.
+ * Opt in with T3CODE_PREFER_CLAUDE_SUBSCRIPTION=1 so isolated launches keep the subscription.
+ */
+const CLAUDE_API_BILLING_VARIABLES = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "ANTHROPIC_PROFILE",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+] as const;
+
+const prefersClaudeSubscription = (environment: NodeJS.ProcessEnv): boolean => {
+  const value = environment.T3CODE_PREFER_CLAUDE_SUBSCRIPTION?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+};
+
+export const stripClaudeApiBillingEnvironment = (
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv => {
+  if (!prefersClaudeSubscription(environment)) return environment;
+  const next = { ...environment };
+  for (const name of CLAUDE_API_BILLING_VARIABLES) delete next[name];
+  return next;
+};
+
+/**
  * Base env for the Claude processes T3 Code runs, before `makeClaudeEnvironment`.
  * Claude Code reads its entrypoint from the process env, not its settings `env`, so T3 Code applies that override itself.
  */
@@ -82,9 +113,10 @@ export const mergeClaudeProcessEnvironment = Effect.fn("mergeClaudeProcessEnviro
   const environment = yield* mergeProviderInstanceEnvironment(instanceEnvironment, baseEnvironment);
   const settingsEntrypoint = (yield* readClaudeSettingsEnv(config, undefined, environment))
     .CLAUDE_CODE_ENTRYPOINT;
-  return settingsEntrypoint
+  const withEntrypoint = settingsEntrypoint
     ? { ...environment, CLAUDE_CODE_ENTRYPOINT: settingsEntrypoint }
     : environment;
+  return stripClaudeApiBillingEnvironment(withEntrypoint);
 });
 
 /** managed-mcp.json excludes other MCP config and forbids --strict-mcp-config; omit the flag when present. */
