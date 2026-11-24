@@ -171,4 +171,25 @@ describe("Codex Auto capabilities", () => {
       });
     }),
   );
+
+  it("de-escalates effort near a Codex subscription limit and blocks an exhausted one", () => {
+    const capabilities = codexAdaptiveCapabilities(instanceId, runtimeModels);
+    const auto: ModelSelection = {
+      instanceId,
+      model: ADAPTIVE_SELECTION,
+      options: [{ id: "reasoningEffort", value: ADAPTIVE_SELECTION }],
+    };
+    const withLimits = (usedPercent: number) => ({
+      ...capabilities,
+      usageLimits: {
+        checkedAt: "2026-11-24T10:00:00.000Z",
+        windows: [{ id: "secondary", kind: "weekly" as const, label: "Weekly", usedPercent }],
+      },
+    });
+    const base = { selection: auto, text: "Implement a save button", nowMs: 0 };
+    expect(resolveAdaptiveTurn({ ...base, capabilities: withLimits(92) })).toMatchObject({
+      route: { requestedEffort: "low" },
+    });
+    expect(resolveAdaptiveTurn({ ...base, capabilities: withLimits(100) })).toHaveProperty("error");
+  });
 });

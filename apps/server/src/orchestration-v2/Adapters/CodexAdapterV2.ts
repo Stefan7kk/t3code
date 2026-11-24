@@ -34,6 +34,7 @@ import {
   type CodexRateLimitSnapshot,
 } from "../../provider/codexUsageLimits.ts";
 import {
+  ADAPTIVE_SELECTION,
   CodexSettings,
   defaultInstanceIdForDriver,
   isOrchestrationV2WorkActive,
@@ -44,6 +45,7 @@ import {
   ProviderSetupError,
   type ServerProviderCompatibilityAdvisory,
   type ServerProviderModel,
+  type ServerProviderUsageLimits,
   isDelegatedAppThread,
   ThreadId,
 } from "@t3tools/contracts";
@@ -1549,7 +1551,10 @@ function codexThreadRuntimeParams(input: {
         };
   return {
     ...(input.runtimePolicy?.cwd == null ? {} : { cwd: input.runtimePolicy.cwd }),
-    ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
+    // Auto resolves per turn in turn/start; never send the placeholder as the thread's model.
+    ...(input.modelSelection === undefined || input.modelSelection.model === ADAPTIVE_SELECTION
+      ? {}
+      : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
       // One app-server serves many threads, so the id goes in per-thread shell config, not its env.
@@ -1866,7 +1871,7 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
   { instanceId, environment, enabled, config }: ProviderAdapterDriverCreateInput<CodexSettings>,
   hooks: Pick<
     CodexAdapterV2Options,
-    "onUsageLimits" | "resolveRuntime" | "compatibility" | "models"
+    "onUsageLimits" | "resolveRuntime" | "compatibility" | "models" | "routingUsageLimits"
   > = {},
 ) {
   const clientFactory = yield* CodexAppServerClientFactory;
@@ -1922,6 +1927,8 @@ export interface CodexAdapterV2Options {
   readonly onUsageLimits?: ManagedServerProvider["applyUsageLimits"];
   /** The provider's published models, read per turn for catalog defaults. */
   readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
+  /** Cached subscription usage limits, read per Auto turn for quota-aware routing. */
+  readonly routingUsageLimits?: () => Effect.Effect<ServerProviderUsageLimits | undefined>;
   readonly resolveRuntime?: Effect.Effect<CodexEffectiveRuntime, ProviderSetupError, Scope.Scope>;
   readonly compatibility?: (
     version: string,
@@ -7615,6 +7622,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             let effectiveSelection = turnInput.modelSelection;
             if (usesAdaptiveSelection(turnInput.modelSelection)) {
               const capabilities = codexAdaptiveCapabilities(adapterOptions.instanceId, models);
+              const usageLimits =
+                adapterOptions.routingUsageLimits === undefined
+                  ? undefined
+                  : yield* adapterOptions.routingUsageLimits();
               const tierOption = getModelSelectionStringOptionValue(
                 turnInput.modelSelection,
                 "autoMaxTier",
@@ -7626,7 +7637,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               );
               const decision = resolveAdaptiveTurn({
                 selection: turnInput.modelSelection,
-                capabilities,
+                capabilities: {
+                  ...capabilities,
+                  ...(usageLimits ? { usageLimits } : {}),
+                },
                 text:
                   turnInput.adaptiveHistory?.taskText ??
                   turnInput.message.text.slice(turnInput.inlineContextLength ?? 0),

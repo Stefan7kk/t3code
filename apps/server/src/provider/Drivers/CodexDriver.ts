@@ -254,6 +254,8 @@ export const CodexDriver: ProviderDriver<
         models: Effect.suspend(() => snapshot.getSnapshot).pipe(
           Effect.map((value) => value.models),
         ),
+        routingUsageLimits: () =>
+          snapshot.getSnapshot.pipe(Effect.map((value) => value.usageLimits)),
         compatibility: installation.compatibility,
       },
     ).pipe(
