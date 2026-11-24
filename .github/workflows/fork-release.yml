@@ -196,7 +196,7 @@ jobs:
           sudo apt-get install -y libsecret-1-dev pkg-config
 
       - name: Fork versioning tests
-        run: node --test scripts/fork/forkVersionNodeTest.mjs scripts/ci/browserInfraRetry.test.mjs
+        run: node --test scripts/fork/forkVersionNodeTest.mjs scripts/ci/browserInfraRetryCheck.mjs
 
       - name: Lint
         run: vp run lint
