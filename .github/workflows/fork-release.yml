@@ -191,7 +191,7 @@ jobs:
           node apps/web/node_modules/playwright/cli.js install-deps chromium
 
       - name: Fork versioning tests
-        run: node --test scripts/fork/forkVersion.test.mjs
+        run: node --test scripts/fork/forkVersionNodeTest.mjs
 
       - name: Lint
         run: vp run lint
