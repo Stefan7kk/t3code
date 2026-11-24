@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as TestClock from "effect/testing/TestClock";
 
 import { snapshotStateDatabase } from "./UpdateStateBackup.ts";
 
@@ -11,6 +12,9 @@ it.layer(NodeServices.layer)("snapshotStateDatabase", (it) => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
+      // it.effect runs on a TestClock at epoch 0; the snapshot stamps DateTime.now, so move the
+      // clock past the seeded backups or the new one sorts first and is pruned as the oldest.
+      yield* TestClock.setTime(Date.parse("2026-01-04T00:00:00Z"));
       const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-update-backup-" });
       yield* fileSystem.writeFileString(path.join(dir, "statev2.sqlite"), "db");
       yield* fileSystem.writeFileString(path.join(dir, "statev2.sqlite-wal"), "wal");
