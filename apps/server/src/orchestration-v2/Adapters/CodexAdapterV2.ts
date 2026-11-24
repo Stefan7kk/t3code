@@ -4,6 +4,8 @@ import { brokenRuntimeError } from "../../provider/providerCompatibility.ts";
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
+import { resolveAdaptiveTurn, usesAdaptiveSelection } from "../adaptiveRouting.ts";
+import { codexAdaptiveCapabilities } from "../../provider/codexAdaptiveRouting.ts";
 import {
   mcpToolPresentation,
   type McpToolPresentation,
@@ -58,6 +60,7 @@ import { appendGeneratedImageEmbeds } from "@t3tools/shared/generatedImageMarkdo
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { mcpToolResultOutput } from "@t3tools/shared/toolOutput";
 import type {
+  AdaptiveModelTier,
   ChatAttachment,
   OrchestrationV2AppThread,
   OrchestrationV2ConversationMessage,
@@ -87,6 +90,7 @@ import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexSchema from "effect-codex-app-server/schema";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
@@ -7608,6 +7612,39 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
             const models = adapterOptions.models === undefined ? [] : yield* adapterOptions.models;
+            let effectiveSelection = turnInput.modelSelection;
+            if (usesAdaptiveSelection(turnInput.modelSelection)) {
+              const capabilities = codexAdaptiveCapabilities(adapterOptions.instanceId, models);
+              const tierOption = getModelSelectionStringOptionValue(
+                turnInput.modelSelection,
+                "autoMaxTier",
+              );
+              const maxTier: AdaptiveModelTier =
+                tierOption === "economy" || tierOption === "worker" ? tierOption : "expert";
+              const budget = Number(
+                getModelSelectionStringOptionValue(turnInput.modelSelection, "autoTokenBudget"),
+              );
+              const decision = resolveAdaptiveTurn({
+                selection: turnInput.modelSelection,
+                capabilities,
+                text:
+                  turnInput.adaptiveHistory?.taskText ??
+                  turnInput.message.text.slice(turnInput.inlineContextLength ?? 0),
+                ...(turnInput.adaptiveHistory === undefined
+                  ? {}
+                  : { history: turnInput.adaptiveHistory }),
+                maxTier,
+                ...(Number.isSafeInteger(budget) && budget > 0 ? { tokenBudget: budget } : {}),
+                nowMs: yield* Clock.currentTimeMillis,
+              });
+              if ("error" in decision) {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver: CODEX_PROVIDER,
+                  detail: decision.error,
+                });
+              }
+              effectiveSelection = decision.selection;
+            }
             const configuredReasoningSummary = yield* client
               .request("config/read", { cwd: turnInput.runtimePolicy.cwd, includeLayers: false })
               .pipe(
@@ -7617,11 +7654,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
               );
             const turnStartParams = yield* buildCodexTurnStartParams({
-              cyberAccess: codexCyberAccess(models, turnInput.modelSelection.model),
+              cyberAccess: codexCyberAccess(models, effectiveSelection.model),
               nativeThreadId: threadId,
               codexInput,
               runtimePolicy: turnInput.runtimePolicy,
-              modelSelection: turnInput.modelSelection,
+              modelSelection: effectiveSelection,
               hasT3Mcp: mcpSession !== undefined,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
@@ -7959,6 +7996,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           instanceId: adapterOptions.instanceId,
           driver: CODEX_PROVIDER,
+          supportsAdaptiveRouting: true,
           providerSessionId: input.providerSessionId,
           providerSession: session,
           events: Stream.fromEffectRepeat(Queue.take(events)),

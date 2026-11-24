@@ -40,6 +40,7 @@ import {
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { withCodexAdaptiveChoices } from "./codexAdaptiveRouting.ts";
 import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
@@ -1157,6 +1158,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       applyPreferredCodexDefaultModel,
       (models) => applyConfiguredCodexServiceTier(models, snapshot.serviceTier),
       (models) => applyConfiguredCodexCyberAccess(models, snapshot),
+      withCodexAdaptiveChoices,
     ),
     skills: snapshot.skills,
     slashCommands: [
