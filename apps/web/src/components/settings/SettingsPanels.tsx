@@ -2408,7 +2408,7 @@ export function ThreadsSettingsPanel() {
             settingKeys={["autoProviderAllowlist"]}
             title={gt("Auto provider allowlist")}
             description={gt(
-              "Checked providers may receive project context when Provider is Auto. Leave every box unchecked to allow each signed-in provider that supports Auto. A provider with no quota reading is not treated as unlimited.",
+              "Only checked providers may receive project context when Provider is Auto. An empty list authorizes nobody. A provider with no quota reading is not treated as unlimited.",
             )}
             control={
               <AutoProviderAllowlist

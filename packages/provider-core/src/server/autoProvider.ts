@@ -30,7 +30,7 @@ export type AutoProviderChoice =
 /**
  * Picks the provider for an Auto-provider turn. Gate order matters: the allowlist is applied
  * before any quota or capability ranking, so a provider outside it can never win.
- * An empty allowlist means every enabled, installed, signed-in provider the user already set up.
+ * An empty allowlist authorizes nobody. Missing quota is not treated as unlimited.
  */
 export function chooseAutoProvider(input: {
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -39,11 +39,17 @@ export function chooseAutoProvider(input: {
   readonly nowMs: number;
 }): AutoProviderChoice {
   const { providers, allowlist, currentInstanceId, nowMs } = input;
+  if (allowlist.length === 0) {
+    return {
+      error:
+        "Auto provider allowlist is empty. Authorize providers in Settings before Auto can send project context.",
+    };
+  }
   const skipped: string[] = [];
   const eligible: Array<{ provider: ServerProvider; headroom: number | undefined }> = [];
   for (const provider of providers) {
     const id = provider.instanceId;
-    if (allowlist.length > 0 && !allowlist.includes(id)) continue;
+    if (!allowlist.includes(id)) continue;
     const why = !provider.enabled
       ? "disabled"
       : !provider.installed
@@ -80,11 +86,7 @@ export function chooseAutoProvider(input: {
   return {
     error: `Auto provider found no allowed provider to use${
       skipped.length > 0 ? `: ${skipped.join(", ")}` : ""
-    }${missing.length > 0 ? `. Not available: ${missing.join(", ")}` : ""}. ${
-      allowlist.length > 0
-        ? "Sign in to, enable, or add providers to the Auto provider allowlist in Settings"
-        : "Enable and sign in to a provider, or choose one manually"
-    }.`,
+    }${missing.length > 0 ? `. Not available: ${missing.join(", ")}` : ""}. Sign in to, enable, or add providers to the Auto provider allowlist in Settings.`,
   };
 }
 

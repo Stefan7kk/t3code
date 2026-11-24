@@ -1409,7 +1409,7 @@ export const ServerSettings = Schema.Struct({
   routingTokenBudget: RoutingTokenBudget.pipe(
     Schema.withDecodingDefault(Effect.succeed("unlimited" as const)),
   ),
-  /** Provider instances Auto provider may send project context to. Empty means only enabled, signed-in ones. */
+  /** Provider instances Auto may send project context to. Empty authorizes none. */
   autoProviderAllowlist: Schema.Array(ProviderInstanceId).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
