@@ -8,6 +8,7 @@ import { msg, T, useGT, useMessages } from "gt-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import {
+  type AdaptiveModelTier,
   type DesktopUpdateChannel,
   IDLE_COMPACTION_MODES,
   type IdleCompactionMode,
@@ -22,6 +23,8 @@ import {
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   type ResponseStreamingMode,
+  type RoutingProfile,
+  type RoutingTokenBudget,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
   ScreenReaderAnnouncements,
@@ -141,6 +144,33 @@ const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
   turn: msg("Text appears once the agent finishes its turn."),
   paragraph: msg("Each paragraph or code block appears as soon as it is complete."),
+};
+
+const ROUTING_PROFILE_LABELS: Record<RoutingProfile, string> = {
+  economy: msg("Economy"),
+  balanced: msg("Balanced"),
+  performance: msg("Performance"),
+  custom: msg("Custom"),
+};
+
+const ROUTING_PROFILE_DESCRIPTIONS: Record<RoutingProfile, string> = {
+  economy: msg("Auto stays on the economy tier with a 200,000 token budget per thread."),
+  balanced: msg("Auto may use any tier, including expert, with no token budget."),
+  performance: msg("Auto may use any tier, including expert, with no token budget."),
+  custom: msg("Auto uses the tier limit and token budget you choose."),
+};
+
+const ROUTING_TIER_LABELS: Record<AdaptiveModelTier, string> = {
+  economy: msg("Economy"),
+  worker: msg("Worker"),
+  expert: msg("Expert"),
+};
+
+const ROUTING_TOKEN_BUDGET_LABELS: Record<RoutingTokenBudget, string> = {
+  unlimited: msg("Unlimited"),
+  "50000": msg("50,000"),
+  "200000": msg("200,000"),
+  "1000000": msg("1,000,000"),
 };
 
 const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string> = {
@@ -608,6 +638,11 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
       ? [gt("Response streaming")]
       : []),
+    ...(settings.routingProfile !== DEFAULT_UNIFIED_SETTINGS.routingProfile ||
+    settings.routingMaxTier !== DEFAULT_UNIFIED_SETTINGS.routingMaxTier ||
+    settings.routingTokenBudget !== DEFAULT_UNIFIED_SETTINGS.routingTokenBudget
+      ? [gt("Auto routing profile")]
+      : []),
     ...(settings.enableProviderUpdateChecks !== DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
       ? [gt("Provider update checks")]
       : []),
@@ -743,6 +778,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
+      routingProfile: DEFAULT_UNIFIED_SETTINGS.routingProfile,
+      routingMaxTier: DEFAULT_UNIFIED_SETTINGS.routingMaxTier,
+      routingTokenBudget: DEFAULT_UNIFIED_SETTINGS.routingTokenBudget,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
@@ -1884,6 +1922,7 @@ export function ThreadsSettingsPanel() {
   const environmentId = environment?.environmentId ?? null;
   const hasServerTargets = connectedEnvironments.length > 0;
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
+  const mixedRoutingProfile = useScopedSettingsMixed(["routingProfile"]);
   const providersByEnvironment = useEnvironmentProviders();
   const serverProviders =
     (environment?.serverConfig
@@ -2255,7 +2294,11 @@ export function ThreadsSettingsPanel() {
           }
         />
         <AdvancedSettings
-          targetIds={[setting("thread-title-instructions").id, setting("response-streaming").id]}
+          targetIds={[
+            setting("thread-title-instructions").id,
+            setting("response-streaming").id,
+            setting("auto-routing-profile").id,
+          ]}
         >
           <ThreadTitleInstructionsSettings />
           <SettingsRow
@@ -2310,6 +2353,129 @@ export function ThreadsSettingsPanel() {
               </Select>
             }
           />
+          <SettingsRow
+            serverScoped
+            settingKeys={["routingProfile"]}
+            {...setting("auto-routing-profile")}
+            description={
+              mixedRoutingProfile
+                ? gt("The selected targets use different routing profiles.")
+                : messages(ROUTING_PROFILE_DESCRIPTIONS[settings.routingProfile])
+            }
+            resetAction={
+              settings.routingProfile !== DEFAULT_UNIFIED_SETTINGS.routingProfile ? (
+                <SettingResetButton
+                  ariaLabel={gt("Reset Auto routing profile to default")}
+                  onClick={() =>
+                    updateSettings({ routingProfile: DEFAULT_UNIFIED_SETTINGS.routingProfile })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={mixedRoutingProfile ? null : settings.routingProfile}
+                onValueChange={(value) => {
+                  if (value !== null && value in ROUTING_PROFILE_LABELS) {
+                    updateSettings({ routingProfile: value as RoutingProfile });
+                  }
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-56"
+                  aria-label={gt("Auto routing profile")}
+                >
+                  <SelectValue>
+                    {(value: RoutingProfile | null) =>
+                      value === null ? gt("Mixed") : messages(ROUTING_PROFILE_LABELS[value])
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {(Object.keys(ROUTING_PROFILE_LABELS) as RoutingProfile[]).map((profile) => (
+                    <SelectItem hideIndicator key={profile} value={profile}>
+                      {messages(ROUTING_PROFILE_LABELS[profile])}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+          {settings.routingProfile === "custom" && !mixedRoutingProfile ? (
+            <>
+              <SettingsRow
+                serverScoped
+                settingKeys={["routingMaxTier"]}
+                title={gt("Maximum Auto tier")}
+                description={gt("Auto stops with an error when a task needs a higher tier.")}
+                control={
+                  <Select
+                    value={settings.routingMaxTier}
+                    onValueChange={(value) => {
+                      if (value !== null && value in ROUTING_TIER_LABELS) {
+                        updateSettings({ routingMaxTier: value as AdaptiveModelTier });
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full sm:w-56"
+                      aria-label={gt("Maximum Auto tier")}
+                    >
+                      <SelectValue>
+                        {(value: AdaptiveModelTier) => messages(ROUTING_TIER_LABELS[value])}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      {(Object.keys(ROUTING_TIER_LABELS) as AdaptiveModelTier[]).map((tier) => (
+                        <SelectItem hideIndicator key={tier} value={tier}>
+                          {messages(ROUTING_TIER_LABELS[tier])}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+              <SettingsRow
+                serverScoped
+                settingKeys={["routingTokenBudget"]}
+                title={gt("Auto token budget per thread")}
+                description={gt("Auto stops when a thread reaches this many tokens.")}
+                control={
+                  <Select
+                    value={settings.routingTokenBudget}
+                    onValueChange={(value) => {
+                      if (value !== null && value in ROUTING_TOKEN_BUDGET_LABELS) {
+                        updateSettings({ routingTokenBudget: value as RoutingTokenBudget });
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-full sm:w-56"
+                      aria-label={gt("Auto token budget per thread")}
+                    >
+                      <SelectValue>
+                        {(value: RoutingTokenBudget) =>
+                          messages(ROUTING_TOKEN_BUDGET_LABELS[value])
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      {(Object.keys(ROUTING_TOKEN_BUDGET_LABELS) as RoutingTokenBudget[]).map(
+                        (budget) => (
+                          <SelectItem hideIndicator key={budget} value={budget}>
+                            {messages(ROUTING_TOKEN_BUDGET_LABELS[budget])}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectPopup>
+                  </Select>
+                }
+              />
+            </>
+          ) : null}
         </AdvancedSettings>
       </SettingsSection>
     </SettingsPageContainer>

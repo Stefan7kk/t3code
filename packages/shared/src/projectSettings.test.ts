@@ -56,8 +56,13 @@ describe("resolveProjectSettings", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       defaultAutoPull: true,
       sidebarAutoSettleAfterDays: 3,
+      routingProfile: "performance",
       projectSettingsOverrides: {
-        [projectId]: { defaultAutoPull: false, sidebarAutoSettleAfterDays: null },
+        [projectId]: {
+          defaultAutoPull: false,
+          sidebarAutoSettleAfterDays: null,
+          routingProfile: "economy",
+        },
       },
     });
     const resolved = resolveProjectSettings(settings, projectId);
@@ -68,6 +73,11 @@ describe("resolveProjectSettings", () => {
     expect(resolved.sources.sidebarAutoSettleAfterDays).toBe("project");
     expect(resolved.sources.defaultThreadEnvMode).toBe("environment");
     expect(resolveProjectSettings(settings, otherProjectId).settings.defaultAutoPull).toBe(true);
+    expect(resolved.settings.routingProfile).toBe("economy");
+    expect(resolveProjectSettings(settings, otherProjectId).settings.routingProfile).toBe(
+      "performance",
+    );
+    expect(DEFAULT_SERVER_SETTINGS.routingProfile).toBe("balanced");
   });
 
   it("honours the aggregate's own fields only until the server has folded them", () => {

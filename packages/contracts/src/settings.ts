@@ -29,6 +29,7 @@ import { containsSecretReference, SettingsSecretValue } from "./settingsSecretVa
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
+  AdaptiveModelTier,
   CustomModelSetting,
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
@@ -1132,6 +1133,13 @@ export const BackgroundActivitySettings = Schema.Struct({
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
 export const ResponseStreamingMode = Schema.Literals(["turn", "paragraph"]);
+
+/** Auto-routing presets. `custom` uses `routingMaxTier` and `routingTokenBudget`. */
+export const RoutingProfile = Schema.Literals(["economy", "balanced", "performance", "custom"]);
+export type RoutingProfile = typeof RoutingProfile.Type;
+/** Same values as the `autoTokenBudget` provider option. */
+export const RoutingTokenBudget = Schema.Literals(["unlimited", "50000", "200000", "1000000"]);
+export type RoutingTokenBudget = typeof RoutingTokenBudget.Type;
 export type ResponseStreamingMode = typeof ResponseStreamingMode.Type;
 
 const StorageRetentionDays = Schema.NullOr(
@@ -1197,6 +1205,9 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleKeepPullRequests",
   "continueThreadsAfterServerUpdate",
   "responseStreamingMode",
+  "routingProfile",
+  "routingMaxTier",
+  "routingTokenBudget",
   "speechProjectCustomWords",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
@@ -1235,6 +1246,9 @@ export const ProjectSettingsOverrides = Schema.Struct({
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+  routingProfile: Schema.optionalKey(RoutingProfile),
+  routingMaxTier: Schema.optionalKey(AdaptiveModelTier),
+  routingTokenBudget: Schema.optionalKey(RoutingTokenBudget),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
@@ -1383,6 +1397,15 @@ export const ServerSettings = Schema.Struct({
   ),
   responseStreamingMode: ResponseStreamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
+  ),
+  routingProfile: RoutingProfile.pipe(
+    Schema.withDecodingDefault(Effect.succeed("balanced" as const)),
+  ),
+  routingMaxTier: AdaptiveModelTier.pipe(
+    Schema.withDecodingDefault(Effect.succeed("expert" as const)),
+  ),
+  routingTokenBudget: RoutingTokenBudget.pipe(
+    Schema.withDecodingDefault(Effect.succeed("unlimited" as const)),
   ),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
@@ -1855,6 +1878,9 @@ export const ServerSettingsPatch = Schema.Struct({
   worktreesDirectory: Schema.optionalKey(TrimmedString),
   fastWorktreeCheckout: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+  routingProfile: Schema.optionalKey(RoutingProfile),
+  routingMaxTier: Schema.optionalKey(AdaptiveModelTier),
+  routingTokenBudget: Schema.optionalKey(RoutingTokenBudget),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   keepAwakeWhileAgentsWork: Schema.optionalKey(Schema.Boolean),

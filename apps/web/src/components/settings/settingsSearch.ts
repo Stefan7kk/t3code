@@ -756,6 +756,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("output token paragraph buffered wait turn legacy")],
   },
   {
+    id: "auto-routing-profile",
+    title: msg("Auto routing profile"),
+    to: "/settings/threads",
+    scope: "project-defaults",
+    searchTerms: [msg("economy balanced performance custom tier token budget model effort auto")],
+  },
+  {
     id: "hide-whitespace-changes",
     title: msg("Hide whitespace changes"),
     to: "/settings/diffs",
