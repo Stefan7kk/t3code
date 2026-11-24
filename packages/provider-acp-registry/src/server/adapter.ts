@@ -20,6 +20,11 @@ import {
   makeCopilotSubagentRouting,
 } from "./copilotAcp.ts";
 import { prefersHttpMcpTransport } from "./mcpTransport.ts";
+import {
+  isQwenAdaptiveAgent,
+  makeQwenAdaptiveResolver,
+  type QwenRoutingSnapshot,
+} from "./qwenAdaptiveRouting.ts";
 import { defaultInstanceIdForDriver, ProviderDriverKind } from "@t3tools/contracts";
 import { readCustomModelEntries } from "@t3tools/shared/model";
 import { AcpRegistrySettings } from "../settings.ts";
@@ -87,6 +92,8 @@ export interface AcpRegistryAdapterV2Options {
   >;
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
+  /** Models and quota for Auto routing; only Qwen Code uses it. */
+  readonly adaptiveRouting?: Effect.Effect<QwenRoutingSnapshot>;
 }
 
 // Mistral Vibe's application rate-limit code, outside ACP.
@@ -325,6 +332,14 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
           // session/new reports a built-in default, not the model Copilot runs (github/copilot-cli#5363).
           alwaysSetModel: true,
         }),
+    ...(options.adaptiveRouting !== undefined && isQwenAdaptiveAgent(options.settings)
+      ? {
+          resolveAdaptiveSelection: makeQwenAdaptiveResolver({
+            instanceId: options.instanceId,
+            snapshot: options.adaptiveRouting,
+          }),
+        }
+      : {}),
     mcpOverHttp: useHttpMcpServers,
     makeRuntime: options.makeRuntime ?? makeAcpRegistryRuntime(runtimeOptions, catalog),
     ...(runtimeCoordinator === undefined
@@ -409,6 +424,46 @@ export type AcpRegistryAdapterV2DriverEnv =
   | ProviderEventLoggers.ProviderEventLoggers
   | ProviderHost.ProviderHost;
 
+const buildAcpRegistryAdapterV2 = Effect.fn("AcpRegistryAdapterV2Driver.create")(function* (
+  input: ProviderAdapterDriverCreateInput<AcpRegistrySettings>,
+  adaptiveRouting?: AcpRegistryAdapterV2Options["adaptiveRouting"],
+) {
+  const hostEnvironment = yield* HostProcess.Environment;
+  const selfInvocation = yield* resolveSelfInvocation();
+  const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
+  const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
+  return yield* makeAcpRegistryAdapterV2({
+    instanceId: input.instanceId,
+    settings: { ...input.config, enabled: input.enabled },
+    environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+    selfInvocation,
+    continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
+    nativeLogging: (threadId) =>
+      makeNativeLogger({
+        nativeEventLogger: providerEventLoggers.native,
+        provider: ACP_REGISTRY_PROVIDER,
+        threadId,
+      }),
+    ...(adaptiveRouting === undefined ? {} : { adaptiveRouting }),
+  });
+});
+
+export const createAcpRegistryAdapterV2 = (
+  input: ProviderAdapterDriverCreateInput<AcpRegistrySettings>,
+  adaptiveRouting?: AcpRegistryAdapterV2Options["adaptiveRouting"],
+) =>
+  buildAcpRegistryAdapterV2(input, adaptiveRouting).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProviderAdapterDriverCreateError({
+          driver: ACP_REGISTRY_PROVIDER,
+          instanceId: input.instanceId,
+          detail: "Failed to create ACP Registry adapter.",
+          cause,
+        }),
+    ),
+  );
+
 export const AcpRegistryAdapterV2Driver: ProviderAdapterDriver<
   AcpRegistrySettings,
   AcpRegistryAdapterV2DriverEnv
@@ -416,37 +471,5 @@ export const AcpRegistryAdapterV2Driver: ProviderAdapterDriver<
   driverKind: ACP_REGISTRY_PROVIDER,
   configSchema: AcpRegistrySettings,
   defaultConfig: (): AcpRegistrySettings => DEFAULT_ACP_REGISTRY_SETTINGS,
-  create: Effect.fn("AcpRegistryAdapterV2Driver.create")(
-    function* (input: ProviderAdapterDriverCreateInput<AcpRegistrySettings>) {
-      const hostEnvironment = yield* HostProcess.Environment;
-      const selfInvocation = yield* resolveSelfInvocation();
-      const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-      const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-      return yield* makeAcpRegistryAdapterV2({
-        instanceId: input.instanceId,
-        settings: { ...input.config, enabled: input.enabled },
-        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
-        selfInvocation,
-        continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
-        nativeLogging: (threadId) =>
-          makeNativeLogger({
-            nativeEventLogger: providerEventLoggers.native,
-            provider: ACP_REGISTRY_PROVIDER,
-            threadId,
-          }),
-      });
-    },
-    (effect, input) =>
-      effect.pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterDriverCreateError({
-              driver: ACP_REGISTRY_PROVIDER,
-              instanceId: input.instanceId,
-              detail: "Failed to create ACP Registry adapter.",
-              cause,
-            }),
-        ),
-      ),
-  ),
+  create: (input) => createAcpRegistryAdapterV2(input),
 };

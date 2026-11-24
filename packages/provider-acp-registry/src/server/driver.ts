@@ -1,4 +1,5 @@
 import {
+  ADAPTIVE_SELECTION,
   officialAcpRegistryIconUrlForAgentId,
   ProviderDriverKind,
   resolveOfficialAcpRegistryIconUrl,
@@ -26,7 +27,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import { AcpRegistryAdapterV2Driver, type AcpRegistryAdapterV2DriverEnv } from "./adapter.ts";
+import { createAcpRegistryAdapterV2, type AcpRegistryAdapterV2DriverEnv } from "./adapter.ts";
+import { isQwenAdaptiveAgent, withQwenAdaptiveChoices } from "./qwenAdaptiveRouting.ts";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
@@ -101,6 +103,7 @@ export function updateAcpRegistryEnrichmentCache(input: {
   readonly configuration: AcpRegistryLiveConfiguration;
   readonly customModels: ReadonlyArray<CustomModelSetting>;
   readonly now: number;
+  readonly adaptive?: boolean;
 }): AcpRegistryEnrichmentCache {
   const { cache, configuration, customModels, now } = input;
   if (cache.entry === null) {
@@ -113,6 +116,8 @@ export function updateAcpRegistryEnrichmentCache(input: {
     cache.entry.provider,
     configuration,
     customModels,
+    cache.entry.provider.models,
+    input.adaptive,
   );
   if (Equal.equals(provider, cache.entry.provider)) return cache;
   return {
@@ -161,6 +166,7 @@ function modelsFromDiscovery(
     | undefined,
   customModels: ReadonlyArray<CustomModelSetting>,
   previousModels: ReadonlyArray<ServerProviderModel> = [],
+  adaptive = false,
 ): ReadonlyArray<ServerProviderModel> {
   const discovered = discovery?.models ?? [];
   const capabilities =
@@ -209,7 +215,8 @@ function modelsFromDiscovery(
           ...(model.id === discovery?.currentModelId ? { isDefault: true } : {}),
           capabilities: capabilitiesFor(model),
         }));
-  return providerModelsFromSettings(builtInModels, customModels, capabilities);
+  const models = providerModelsFromSettings(builtInModels, customModels, capabilities);
+  return adaptive ? withQwenAdaptiveChoices(models) : models;
 }
 
 function acpRegistrySnapshotReadiness(
@@ -321,7 +328,12 @@ function baseSnapshot(
             : input.settings.agentId.length > 0),
     },
     ...(input.message ? { message: input.message } : {}),
-    models: modelsFromDiscovery(input.probe?.probe, input.settings.customModels),
+    models: modelsFromDiscovery(
+      input.probe?.probe,
+      input.settings.customModels,
+      [],
+      isQwenAdaptiveAgent(input.settings),
+    ),
     ...(input.probe === undefined
       ? {}
       : {
@@ -353,11 +365,14 @@ export function applyAcpRegistryLiveConfiguration(
   configuration: AcpRegistryLiveConfiguration,
   customModels: ReadonlyArray<CustomModelSetting>,
   previousModels: ReadonlyArray<ServerProviderModel> = provider.models,
+  adaptive = false,
 ): ServerProvider {
   const { message: _staleProbeMessage, ...snapshot } = provider;
   // session/load may omit models (Kimi returns `{}`); keep the probed list
   // and apply any live option descriptors to it.
-  const probedModels = provider.models.filter((model) => !model.isCustom);
+  const probedModels = provider.models.filter(
+    (model) => !model.isCustom && model.slug !== ADAPTIVE_SELECTION,
+  );
   // A cold-start session can report one placeholder model before its catalog
   // settles, while the probe may already have observed the full catalog. A
   // single model enumerated by an explicit select is not that fallback but
@@ -395,6 +410,7 @@ export function applyAcpRegistryLiveConfiguration(
             discovery,
             customModels,
             previousModels.filter((model) => !model.isCustom),
+            adaptive,
           ),
   };
 }
@@ -653,14 +669,18 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
       environment,
       hostEnvironment,
     );
-    const orchestrationAdapter = yield* AcpRegistryAdapterV2Driver.create({
-      instanceId,
-      displayName,
-      accentColor,
-      environment,
-      enabled,
-      config,
-    }).pipe(
+    const orchestrationAdapter = yield* createAcpRegistryAdapterV2(
+      {
+        instanceId,
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      },
+      // The snapshot already carries the discovered models and Bailian quota windows.
+      Effect.suspend(() => snapshot.getSnapshot),
+    ).pipe(
       Effect.mapError(
         (cause) =>
           new ProviderDriverError({
@@ -697,6 +717,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
           configuration,
           effectiveConfig.customModels,
           learned.length > 0 ? learned : provider.models,
+          isQwenAdaptiveAgent(effectiveConfig),
         );
         return [next, next.models === provider.models ? learned : next.models];
       });
@@ -913,6 +934,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
                           configuration,
                           customModels: effectiveConfig.customModels,
                           now,
+                          adaptive: isQwenAdaptiveAgent(effectiveConfig),
                         }),
                       ),
                     ),
