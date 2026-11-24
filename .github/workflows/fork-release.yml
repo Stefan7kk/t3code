@@ -190,6 +190,11 @@ jobs:
           node apps/web/node_modules/playwright/cli.js install --only-shell chromium
           node apps/web/node_modules/playwright/cli.js install-deps chromium
 
+      - name: Install native test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev pkg-config
+
       - name: Fork versioning tests
         run: node --test scripts/fork/forkVersionNodeTest.mjs
 
