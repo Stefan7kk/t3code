@@ -63,6 +63,7 @@ import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistryAuth from "./auth.ts";
 import * as AcpRegistryAuthenticationState from "./authenticationState.ts";
+import { makeBailianTokenPlanQuotaProbe } from "./bailianTokenPlanQuota.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
@@ -734,6 +735,15 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
     });
     // A local executable's version comes only from probing it, so readiness checks reuse the last report.
     const reportedLocalVersion = yield* Ref.make<string | null>(null);
+    const tokenPlanQuota = effectiveConfig.tokenPlanQuotaEnabled
+      ? yield* makeBailianTokenPlanQuotaProbe({
+          blPath: effectiveConfig.tokenPlanBlPath,
+          configProfile: effectiveConfig.tokenPlanConfigProfile,
+          consoleSite: effectiveConfig.tokenPlanConsoleSite,
+          consoleRegion: effectiveConfig.tokenPlanConsoleRegion,
+          environment: processEnvironment,
+        })
+      : null;
     const checkProvider = checkAcpRegistryProviderReadiness(readinessInput).pipe(
       Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, catalog),
       Effect.flatMap((provider) =>
@@ -746,6 +756,19 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
         ),
       ),
       Effect.flatMap(withLiveRuntimeState),
+      Effect.filterOrElse(
+        (provider) => tokenPlanQuota === null || !provider.installed,
+        (provider) =>
+          tokenPlanQuota!.check.pipe(
+            Effect.map((reading) => ({
+              ...provider,
+              usageLimits: reading.limits,
+              ...(reading.tierLabel !== undefined
+                ? { auth: { ...provider.auth, label: reading.tierLabel } }
+                : {}),
+            })),
+          ),
+      ),
     );
     const enrichProvider = checkAcpRegistryProviderStatus(
       {
@@ -818,6 +841,14 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
       // Inspection may fetch the registry when its disk cache is missing; creation must not wait on that.
       initialSnapshot: () => buildInitialAcpRegistrySnapshot(readinessInput),
       checkProvider,
+      ...(tokenPlanQuota !== null
+        ? {
+            checkUsageLimits: tokenPlanQuota.checkFresh.pipe(
+              Effect.map((reading) => reading.limits),
+            ),
+            invalidateUsageCache: tokenPlanQuota.invalidate,
+          }
+        : {}),
       enrichSnapshot: Effect.fn("enrichSnapshot")(function ({
         snapshot,
         getSnapshot,

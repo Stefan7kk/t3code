@@ -62,9 +62,65 @@ export const AcpRegistrySettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    tokenPlanQuotaEnabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Bailian Token Plan quota",
+        description:
+          "Show Alibaba Cloud Token Plan quota in Usage → Limits using the Bailian CLI (bl). Requires a bl console sign-in; quota reads never spend inference tokens.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
+    tokenPlanBlPath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Bailian CLI path",
+        description: "Executable used to read Token Plan quota.",
+        providerSettingsForm: { placeholder: "bl", clearWhenEmpty: "omit" },
+      }),
+    ),
+    tokenPlanConfigProfile: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("token-plan")),
+      Schema.annotateKey({
+        title: "Bailian config profile",
+        description:
+          "bl profile holding the Token Plan credentials. Empty uses the active profile.",
+        providerSettingsForm: { placeholder: "token-plan", clearWhenEmpty: "persist" },
+      }),
+    ),
+    tokenPlanConsoleSite: Schema.Literals(["international", "domestic"]).pipe(
+      Schema.withDecodingDefault(Effect.succeed("international")),
+      Schema.annotateKey({
+        title: "Bailian console site",
+        providerSettingsForm: {
+          control: "select",
+          options: [
+            { value: "international", label: "International (Singapore)" },
+            { value: "domestic", label: "China" },
+          ],
+        },
+      }),
+    ),
+    tokenPlanConsoleRegion: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("ap-southeast-1")),
+      Schema.annotateKey({
+        title: "Bailian console region",
+        providerSettingsForm: { placeholder: "ap-southeast-1", clearWhenEmpty: "persist" },
+      }),
+    ),
   },
   {
-    order: ["source", "agentId", "commandPath", "authMethodId"],
+    order: [
+      "source",
+      "agentId",
+      "commandPath",
+      "authMethodId",
+      "tokenPlanQuotaEnabled",
+      "tokenPlanBlPath",
+      "tokenPlanConfigProfile",
+      "tokenPlanConsoleSite",
+      "tokenPlanConsoleRegion",
+    ],
   },
 );
 export type AcpRegistrySettings = typeof AcpRegistrySettings.Type;

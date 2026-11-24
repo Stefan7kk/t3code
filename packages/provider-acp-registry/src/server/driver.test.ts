@@ -1188,4 +1188,71 @@ it.layer(driverLayer, { excludeTestServices: true })("AcpRegistryDriver", (it) =
       );
     }),
   );
+
+  const qwenQuotaCatalog = Effect.fn("test.qwenQuotaCatalog")(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "acp-driver-" });
+    const agentPath = path.join(directory, "agent.mjs");
+    const modelsPath = path.join(directory, "models.json");
+    yield* fileSystem.writeFileString(agentPath, fakeAgentSource);
+    yield* fileSystem.writeFileString(modelsPath, JSON.stringify(["qwen-model"]));
+    return {
+      ...catalogWithInspection({
+        status: "ready",
+        agentId: "qwen-code",
+        version: "0.28.4",
+        distribution: "npx",
+      }),
+      resolve: () =>
+        Effect.succeed({
+          distribution: "npx" as const,
+          spawn: { command: process.execPath, args: [agentPath, modelsPath] },
+        }),
+    };
+  });
+
+  it.effect("leaves Bailian Token Plan quota monitoring off by default", () =>
+    Effect.gen(function* () {
+      const instance = yield* AcpRegistryDriver.create({
+        instanceId: identity.instanceId,
+        displayName: identity.displayName,
+        enabled: true,
+        environment: [],
+        config: decodeSettings({ agentId: "qwen-code" }),
+      }).pipe(
+        Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, yield* qwenQuotaCatalog()),
+      );
+      yield* instance.snapshot.refresh;
+      expect((yield* instance.snapshot.getSnapshot).usageLimits).toBeUndefined();
+    }),
+  );
+
+  it.effect("reports unreadable Token Plan quota when the Bailian CLI is missing", () =>
+    Effect.gen(function* () {
+      const instance = yield* AcpRegistryDriver.create({
+        instanceId: identity.instanceId,
+        displayName: identity.displayName,
+        enabled: true,
+        environment: [],
+        config: decodeSettings({
+          agentId: "qwen-code",
+          tokenPlanQuotaEnabled: true,
+          tokenPlanBlPath: "/nonexistent/t3-bailian-quota-test/bl",
+        }),
+      }).pipe(
+        Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, yield* qwenQuotaCatalog()),
+      );
+      yield* instance.snapshot.refresh;
+      const snapshot = yield* instance.snapshot.getSnapshot;
+      expect(snapshot.usageLimits?.windows).toEqual([]);
+      expect(snapshot.usageLimits?.unavailable?.reason).toBe("probeFailed");
+      expect(snapshot.usageLimits?.unavailable?.message).toMatch(/not found/);
+      // An explicit refresh must re-probe instead of serving the cached failure forever.
+      yield* instance.snapshot.refreshUsage ?? Effect.void;
+      expect((yield* instance.snapshot.getSnapshot).usageLimits?.unavailable?.reason).toBe(
+        "probeFailed",
+      );
+    }),
+  );
 });

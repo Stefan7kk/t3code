@@ -101,6 +101,48 @@ describe("adaptive routing", () => {
     ).toMatchObject({ route: { requestedEffort: "medium" } });
   });
 
+  it("honors Bailian Token Plan quota windows like any subscription limit", () => {
+    const base = { selection: auto, capabilities, text: "Implement a save button", nowMs: 0 };
+    const tokenPlan = (usedPercent: number): AdaptiveProviderCapabilities => ({
+      ...capabilities,
+      usageLimits: {
+        checkedAt: "2026-11-24T10:00:00.000Z",
+        windows: [
+          {
+            id: "token_plan_per1Month",
+            kind: "monthly",
+            label: "Monthly quota",
+            usedPercent,
+            resetsAt: "2026-12-01T00:00:00.000Z",
+            windowDurationMins: 30 * 24 * 60,
+          },
+        ],
+      },
+    });
+    expect(resolveAdaptiveTurn({ ...base, capabilities: tokenPlan(42) })).toMatchObject({
+      route: { requestedEffort: "medium" },
+    });
+    expect(resolveAdaptiveTurn({ ...base, capabilities: tokenPlan(92) })).toMatchObject({
+      route: { requestedEffort: "low", reason: expect.stringContaining("subscription limit") },
+    });
+    expect(resolveAdaptiveTurn({ ...base, capabilities: tokenPlan(100) })).toHaveProperty("error");
+    // Unreadable quota keeps routing possible but must not advertise an unlimited allowance.
+    const unreadable: AdaptiveProviderCapabilities = {
+      ...capabilities,
+      usageLimits: {
+        checkedAt: "2026-11-24T10:00:00.000Z",
+        windows: [],
+        unavailable: {
+          reason: "probeFailed",
+          message: "Bailian reported no Token Plan quota data.",
+        },
+      },
+    };
+    expect(resolveAdaptiveTurn({ ...base, capabilities: unreadable })).toMatchObject({
+      selection: { model: "work" },
+    });
+  });
+
   it("maps normalized effort to provider-specific option values", () => {
     const selection = { ...auto, options: [{ id: "variant", value: ADAPTIVE_SELECTION }] };
     expect(
