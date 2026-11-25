@@ -33,6 +33,13 @@ const KNOWN_SHARED_DIRECTORIES = [
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "auth.lock", "models_cache.json"]);
 // Finder maintains metadata separately for each directory, including shadow homes.
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp", ".DS_Store"]);
+// Codex creates its log database in whichever home it runs from. A shadow that ran before the
+// shared home had one keeps its own copy; linking it later would fail every session open.
+const SHADOW_LOCAL_ENTRY_PATTERN = /^logs_\d+\.sqlite(?:-shm|-wal)?$/;
+
+function isShadowLocalEntry(entryName: string): boolean {
+  return SHADOW_LOCAL_ENTRY_NAMES.has(entryName) || SHADOW_LOCAL_ENTRY_PATTERN.test(entryName);
+}
 // Shadow homes may create local runtime locks first; replace them with shared links because they guard shared state.
 const REPLACEABLE_SHARED_RUNTIME_ENTRIES = new Set([
   "mcp-oauth-locks",
@@ -235,6 +242,22 @@ const removePrivateSymlink = Effect.fn("CodexHomeLayout.removePrivateSymlink")(f
   }
 });
 
+// SQLite on Windows creates -shm/-wal beside the path it opened, so a database reached through a
+// shadow link can leave local sidecars before the shared ones exist. -shm is a rebuildable index
+// and an empty -wal or -journal holds no data, so those are safe to replace with shared links.
+function isDiscardableSqliteSidecar(
+  fileSystem: FileSystem.FileSystem,
+  filePath: string,
+  entryName: string,
+): Effect.Effect<boolean> {
+  if (entryName.endsWith(".sqlite-shm")) return Effect.succeed(true);
+  if (!/\.sqlite-(?:wal|journal)$/.test(entryName)) return Effect.succeed(false);
+  return fileSystem.stat(filePath).pipe(
+    Effect.map((info) => Number(info.size) === 0),
+    Effect.orElseSucceed(() => false),
+  );
+}
+
 const ensureSymlink = Effect.fn("CodexHomeLayout.ensureSymlink")(function* (input: {
   readonly fileSystem: FileSystem.FileSystem;
   readonly sharedHomePath: string;
@@ -265,7 +288,10 @@ const ensureSymlink = Effect.fn("CodexHomeLayout.ensureSymlink")(function* (inpu
   );
 
   if (state._tag === "NotSymlink") {
-    if (!REPLACEABLE_SHARED_RUNTIME_ENTRIES.has(input.entryName)) {
+    const replaceable =
+      REPLACEABLE_SHARED_RUNTIME_ENTRIES.has(input.entryName) ||
+      (yield* isDiscardableSqliteSidecar(input.fileSystem, link, input.entryName));
+    if (!replaceable) {
       return yield* new CodexShadowHomeEntryConflictError({
         sharedHomePath: input.sharedHomePath,
         effectiveHomePath: input.effectiveHomePath,
@@ -418,7 +444,7 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
   );
   const entries = new Set<string>(KNOWN_SHARED_DIRECTORIES);
   for (const entryName of sharedEntryNames) {
-    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !SHADOW_LOCAL_ENTRY_NAMES.has(entryName)) {
+    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !isShadowLocalEntry(entryName)) {
       entries.add(entryName);
     }
   }

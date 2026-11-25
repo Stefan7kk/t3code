@@ -363,5 +363,101 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
           );
         }),
     );
+
+    // Regression: Codex wrote logs_2.sqlite into the shadow before the shared home had one, and
+    // every later session open failed, so switching to that Codex account never worked.
+    it.effect.skipIf(!symlinksSupported)(
+      "keeps each account's private auth across instances that share one home",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+          yield* writeTextFile(path.join(sharedHome, "auth.json"), '{"account":"shared"}');
+          yield* writeTextFile(path.join(sharedHome, "memories_1.sqlite"), "db");
+          yield* writeTextFile(path.join(sharedHome, "memories_1.sqlite-shm"), "shared-shm");
+          yield* writeTextFile(path.join(sharedHome, "memories_1.sqlite-wal"), "");
+          const accounts = ["vasilev", "erika"];
+          for (const account of accounts) {
+            const shadowHome = path.join(shadowRoot, account);
+            yield* writeTextFile(path.join(shadowHome, "auth.json"), `{"account":"${account}"}`);
+            // Regression: Codex opened the DB through the link before the shared sidecars existed.
+            yield* writeTextFile(path.join(shadowHome, "memories_1.sqlite-shm"), "stray");
+            yield* writeTextFile(path.join(shadowHome, "memories_1.sqlite-wal"), "");
+          }
+
+          for (const account of accounts) {
+            const shadowHome = path.join(shadowRoot, account);
+            yield* materializeCodexShadowHome(
+              yield* resolveCodexHomeLayout(
+                decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+              ),
+            );
+          }
+
+          for (const account of accounts) {
+            const shadowHome = path.join(shadowRoot, account);
+            expect(yield* fileSystem.readFileString(path.join(shadowHome, "auth.json"))).toBe(
+              `{"account":"${account}"}`,
+            );
+            expect(yield* fileSystem.readLink(path.join(shadowHome, "memories_1.sqlite-shm"))).toBe(
+              path.join(sharedHome, "memories_1.sqlite-shm"),
+            );
+            expect(yield* fileSystem.readLink(path.join(shadowHome, "memories_1.sqlite-wal"))).toBe(
+              path.join(sharedHome, "memories_1.sqlite-wal"),
+            );
+          }
+          expect(yield* fileSystem.readFileString(path.join(sharedHome, "auth.json"))).toBe(
+            '{"account":"shared"}',
+          );
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "refuses to discard a shadow-local SQLite WAL that still holds data",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+          const shadowHome = path.join(shadowRoot, "shadow");
+          yield* writeTextFile(path.join(sharedHome, "state_5.sqlite-wal"), "");
+          yield* writeTextFile(path.join(shadowHome, "state_5.sqlite-wal"), "pending frames");
+
+          const error = yield* materializeCodexShadowHome(
+            yield* resolveCodexHomeLayout(
+              decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+            ),
+          ).pipe(Effect.flip);
+
+          expect(error).toBeInstanceOf(CodexShadowHomeEntryConflictError);
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "keeps a shadow-local Codex log database instead of failing",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+          const shadowHome = path.join(shadowRoot, "shadow");
+          for (const name of ["logs_2.sqlite", "logs_2.sqlite-shm", "logs_2.sqlite-wal"]) {
+            yield* writeTextFile(path.join(sharedHome, name), "shared");
+            yield* writeTextFile(path.join(shadowHome, name), "local");
+          }
+
+          const layout = yield* resolveCodexHomeLayout(
+            decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+          );
+          yield* materializeCodexShadowHome(layout);
+
+          expect(yield* fileSystem.readFileString(path.join(shadowHome, "logs_2.sqlite"))).toBe(
+            "local",
+          );
+        }),
+    );
   });
 });
