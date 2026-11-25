@@ -24,7 +24,7 @@ import {
 } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render, type Screen } from "../../../test/render";
@@ -422,6 +422,8 @@ describe("project settings permissions", () => {
   it("moves a draft on the removed checkout to a remaining checkout of the group", async () => {
     setup();
     const draftId = DraftId.make("draft-handed-off");
+    // The draft store persists across test files; leave no draft for later sidebar tests.
+    onTestFinished(() => useComposerDraftStore.getState().clearDraftThread(draftId));
     const [primaryProject, remoteProject] = state.projects;
     const drafts = useComposerDraftStore.getState();
     drafts.setLogicalProjectDraftThreadId(
