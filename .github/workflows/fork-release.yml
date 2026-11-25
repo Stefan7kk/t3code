@@ -280,11 +280,14 @@ jobs:
 
   build-publish:
     name: Build Windows installer and publish
-    needs: [detect, gate, cli-archive]
+    # Builds beside the regression gate; the "Wait for regression gate" step blocks push and publish.
+    needs: [detect, cli-archive]
+    if: needs.detect.outputs.should_release == 'true'
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     permissions:
       contents: write
+      actions: read
     steps:
       - name: Checkout fork main
         shell: bash
@@ -299,7 +302,7 @@ jobs:
           git checkout --force "$MAIN_SHA"
           git log -1 --format=%H
 
-      - name: Merge upstream stable and push
+      - name: Merge upstream stable
         if: needs.detect.outputs.upstream_tag != ''
         shell: bash
         env:
@@ -318,7 +321,6 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git merge --no-ff "upstream/${UPSTREAM_TAG}" \
             -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" HEAD:refs/heads/main
 
       - name: Download CLI archive
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -387,6 +389,33 @@ jobs:
           grep " ${archive}\$" checksums.txt | sha256sum -c -
           unzip -o "$archive" gitleaks.exe
           ./gitleaks.exe dir release --redact --no-banner --exit-code 1
+
+      - name: Wait for regression gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          job="Merge, secret scan, regression tests"
+          for _ in $(seq 1 180); do
+            state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"               --jq ".jobs[] | select(.name == \"$job\") | .status + \" \" + (.conclusion // \"\")")"
+            echo "gate: ${state:-pending}"
+            case "$state" in
+              "completed success") exit 0 ;;
+              completed*) echo "::error::Regression gate did not pass; nothing is published."; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::Timed out waiting for the regression gate."
+          exit 1
+
+      - name: Push merged main
+        if: needs.detect.outputs.upstream_tag != ''
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" HEAD:refs/heads/main
 
       - name: Publish GitHub Release
         shell: bash
