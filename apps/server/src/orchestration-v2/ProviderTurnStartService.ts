@@ -2328,7 +2328,9 @@ export const layer: Layer.Layer<
             (turn) =>
               turn.providerThreadId === runningProviderThread.id &&
               turn.runAttemptId !== attempt.id &&
-              turn.status === "completed",
+              turn.adaptiveRoute !== undefined &&
+              // A failed turn's route may be the reason it failed; an interrupted one was fine.
+              (turn.status === "completed" || turn.status === "interrupted"),
           )?.adaptiveRoute
         : undefined;
       const adaptiveHistory = usesAdaptiveSelection(run.modelSelection)
@@ -2343,6 +2345,7 @@ export const layer: Layer.Layer<
             ...(previousAuto === undefined
               ? {}
               : {
+                  previousRoute: previousAuto,
                   previousSelection: {
                     instanceId: run.modelSelection.instanceId,
                     model: previousAuto.requestedModel,

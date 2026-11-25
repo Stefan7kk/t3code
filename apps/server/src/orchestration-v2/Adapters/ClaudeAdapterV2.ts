@@ -5,12 +5,18 @@ import {
   type AdaptiveModelTier,
   type ServerProviderUsageLimits,
 } from "@t3tools/contracts";
-import { resolveAdaptiveTurn, usesAdaptiveSelection } from "../adaptiveRouting.ts";
+import {
+  adaptiveTaskIsUnclear,
+  resolveAdaptiveTurn,
+  usesAdaptiveSelection,
+  type AdaptivePrecheck,
+} from "../adaptiveRouting.ts";
 import {
   claudeAdaptiveAgentGuidance,
   claudeAdaptiveAgents,
   claudeAdaptiveCapabilities,
   claudeAdaptiveDiffTool,
+  claudeAdaptiveTurnFailed,
   claudeAdaptiveReviewServer,
   claudeAdaptiveUsageLimits,
   readClaudeAdaptiveDiff,
@@ -5421,6 +5427,8 @@ interface ActiveClaudeTurnContext {
   adaptiveRoute?: AdaptiveRoute;
   readonly routingAgentsUsed?: Set<string>;
   adaptiveTestFailed?: boolean;
+  /** Failed tool calls this turn, counted per identical call. */
+  readonly adaptiveToolErrors?: Map<string, number>;
   retryBudgetFailure?: OrchestrationV2ProviderFailure;
   // Set when the prompt starts or a request goes out; cleared by the turn's next frame.
   unansweredRequestSince?: DateTime.Utc | undefined;
@@ -6041,6 +6049,11 @@ export interface ClaudeAdapterV2Options {
     includeRuntimeModels?: boolean,
   ) => Effect.Effect<ClaudeModelCatalog>;
   readonly routingUsageLimits?: () => Effect.Effect<ServerProviderUsageLimits | undefined>;
+  /** One small economy-model call for a request the rules cannot place; undefined = rules decide. */
+  readonly routingPrecheck?: (input: {
+    readonly text: string;
+    readonly model: string;
+  }) => Effect.Effect<AdaptivePrecheck | undefined>;
   readonly continuationRequests?: {
     readonly offer: (
       request: ProviderContinuationRequests.ProviderContinuationRequest,
@@ -9912,14 +9925,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             requested.status === "interrupted" && retryBudgetFailure !== undefined
               ? { ...requested, status: "failed" as const, failure: retryBudgetFailure }
               : requested;
+          const adaptiveTurnFailed = claudeAdaptiveTurnFailed(
+            input.context.adaptiveTestFailed,
+            input.context.adaptiveToolErrors?.values() ?? [],
+          );
           if (
             input.status === "completed" &&
             input.context.adaptiveRoute &&
-            input.context.adaptiveTestFailed !== undefined
+            adaptiveTurnFailed !== undefined
           ) {
             input.context.adaptiveRoute = {
               ...input.context.adaptiveRoute,
-              failureCount: input.context.adaptiveTestFailed
+              failureCount: adaptiveTurnFailed
                 ? (input.context.adaptiveRoute.failureCount ?? 0) + 1
                 : 0,
             };
@@ -13612,6 +13629,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   hook.hook_event_name === "PostToolUse" ||
                   hook.hook_event_name === "PostToolUseFailure"
                 ) {
+                  if (
+                    hook.hook_event_name === "PostToolUseFailure" &&
+                    !hook.is_interrupt &&
+                    !/denied|permission|rejected|cancelled/i.test(hook.error)
+                  ) {
+                    // shortcut: calls are told apart by command or file only, so three failures of
+                    // another tool count as one loop; key on the full input if that misfires.
+                    const call = `${hook.tool_name}:${String(field(input, "command") ?? field(input, "file_path") ?? "")}`;
+                    const errors = context.adaptiveToolErrors;
+                    errors?.set(call, (errors.get(call) ?? 0) + 1);
+                  }
                   const command = field(input, "command");
                   if (
                     typeof command === "string" &&
@@ -13782,6 +13810,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const budget = Number(
               getModelSelectionStringOptionValue(turnInput.modelSelection, "autoTokenBudget"),
             );
+            const taskText =
+              turnInput.adaptiveHistory?.taskText ??
+              turnInput.message.text.slice(turnInput.inlineContextLength ?? 0);
+            const economyModel = capabilities.models.find((model) => model.tier === "economy");
+            const precheck =
+              adapterOptions.routingPrecheck !== undefined &&
+              economyModel !== undefined &&
+              adaptiveTaskIsUnclear({
+                text: taskText,
+                capabilities,
+                ...(turnInput.adaptiveHistory === undefined
+                  ? {}
+                  : { history: turnInput.adaptiveHistory }),
+              })
+                ? yield* adapterOptions.routingPrecheck({ text: taskText, model: economyModel.id })
+                : undefined;
             const nowMs = yield* Clock.currentTimeMillis;
             const decision = resolveAdaptiveTurn({
               selection: turnInput.modelSelection,
@@ -13790,9 +13834,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 ...(fixedEffort ? { fixedEffort } : {}),
                 ...(usageLimits ? { usageLimits } : {}),
               },
-              text:
-                turnInput.adaptiveHistory?.taskText ??
-                turnInput.message.text.slice(turnInput.inlineContextLength ?? 0),
+              text: taskText,
+              ...(precheck === undefined ? {} : { precheck }),
               ...(turnInput.adaptiveHistory === undefined
                 ? {}
                 : { history: turnInput.adaptiveHistory }),
@@ -13870,7 +13913,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               hooks: {
                 PreToolUse: [{ matcher: "Agent|Task", hooks: [onRoutedTool], onFailure: "block" }],
                 PostToolUse: [{ matcher: "Bash|PowerShell", hooks: [onRoutedTool] }],
-                PostToolUseFailure: [{ matcher: "Bash|PowerShell", hooks: [onRoutedTool] }],
+                PostToolUseFailure: [{ hooks: [onRoutedTool] }],
               },
             };
             adaptive = {
@@ -14448,6 +14491,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 : {
                     adaptiveRoute: querySession.adaptive.route,
                     routingAgentsUsed: new Set<string>(),
+                    adaptiveToolErrors: new Map<string, number>(),
                   }),
               autoCompactWindow,
               queryPolicy: querySession.queryPolicy,
@@ -15910,6 +15954,7 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       | "modelCatalog"
       | "routeModelCatalog"
       | "routingUsageLimits"
+      | "routingPrecheck"
     > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;

@@ -19,6 +19,7 @@ import * as OpenCodeServerOwner from "./OpenCodeServerOwner.ts";
 const GENERATION_TIMEOUT = "3 minutes";
 
 const OpenCodeTextGenerationOperation = Schema.Literals([
+  "classifyAdaptiveRoute",
   "generateCommitMessage",
   "generatePrContent",
   "generateBranchName",

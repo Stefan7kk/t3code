@@ -176,6 +176,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     // Retain reports until the registry subscribes; end its listener on teardown.
     const workspaceRescans = yield* Queue.unbounded<string, Cause.Done>();
     yield* Effect.addFinalizer(() => Queue.end(workspaceRescans));
+    const textGeneration = yield* makeClaudeTextGeneration(
+      effectiveConfig,
+      processEnv,
+      modelCatalog,
+      modelRoutes.route,
+    );
     const orchestrationAdapter = yield* createClaudeAdapterV2(
       {
         instanceId,
@@ -193,6 +199,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         routeModelCatalog: modelRoutes.route,
         routingUsageLimits: (): Effect.Effect<ServerProvider["usageLimits"]> =>
           snapshot.getSnapshot.pipe(Effect.map((provider) => provider.usageLimits)),
+        // Same provider only; a slow or failed pre-check leaves the decision to the rules.
+        routingPrecheck: ({ text, model }) =>
+          (
+            textGeneration.classifyAdaptiveRoute?.({
+              cwd: stateDir,
+              text,
+              modelSelection: { instanceId, model },
+            }) ?? Effect.undefined
+          ).pipe(
+            Effect.timeout("10 seconds"),
+            Effect.orElseSucceed(() => undefined),
+          ),
       },
     ).pipe(
       Effect.mapError(
@@ -204,12 +222,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
             cause,
           }),
       ),
-    );
-    const textGeneration = yield* makeClaudeTextGeneration(
-      effectiveConfig,
-      processEnv,
-      modelCatalog,
-      modelRoutes.route,
     );
 
     // Per-instance capabilities cache: keyed on binary + resolved HOME so

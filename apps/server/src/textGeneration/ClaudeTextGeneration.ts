@@ -218,8 +218,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     TextGenerationError,
     S["DecodingServices"] | Scope.Scope
   > {
+    // Titles and route pre-checks judge the message alone: no project files.
     const workingDirectory =
-      operation === "generateThreadTitle"
+      operation === "generateThreadTitle" || operation === "classifyAdaptiveRoute"
         ? yield* fileSystem
             .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
             .pipe(
@@ -341,6 +342,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           jsonSchemaStr,
           "--model",
           apiModelId,
+          // Replacing the default system prompt keeps the pre-check near 3k input tokens.
+          ...(operation === "classifyAdaptiveRoute"
+            ? ["--system-prompt", TextGenerationOperations.ADAPTIVE_ROUTE_INSTRUCTIONS]
+            : []),
           ...(cliEffort ? ["--effort", cliEffort] : []),
           "--settings",
           settingsArgument,

@@ -1,4 +1,5 @@
 import type {
+  AdaptiveModelTier,
   BranchNamingOptions,
   ChatAttachment,
   ModelSelection,
@@ -118,7 +119,25 @@ export interface TranscriptionPostProcessingResult {
   transcription: string;
 }
 
+export interface AdaptiveRouteClassificationInput {
+  cwd: string;
+  /** The user's request; only its first 1,500 characters are sent. */
+  text: string;
+  /** The provider's cheapest model. */
+  modelSelection: ModelSelection;
+}
+
+export interface AdaptiveRouteClassificationResult {
+  tier: AdaptiveModelTier;
+  effort: "low" | "medium" | "high";
+}
+
 export interface ProviderTextGeneration {
+  /** Places a request the Auto routing rules cannot. Without it the rules decide alone. */
+  readonly classifyAdaptiveRoute?: (
+    input: AdaptiveRouteClassificationInput,
+  ) => Effect.Effect<AdaptiveRouteClassificationResult, TextGenerationError>;
+
   readonly generateTranscriptionPostProcessing: (
     input: TranscriptionPostProcessingInput,
   ) => Effect.Effect<TranscriptionPostProcessingResult, TextGenerationError>;

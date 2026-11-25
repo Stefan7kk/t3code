@@ -31,7 +31,12 @@ describe("adaptive routing", () => {
     ["Design the authentication architecture", "deep", "high"],
     ["Review the pending diff", "work", "medium"],
     ["Reply with just OK", "quick", "low"],
-    ["thanks, what does this error mean?", "quick", "low"],
+    ["thanks, what does this error mean?", "work", "medium"],
+    ["why is it so slow", "work", "medium"],
+    ["Is the build broken?", "work", "medium"],
+    ["It works, but why does it crash on exit?", "work", "medium"],
+    [`Implement the importer. ${"Handle every listed case. ".repeat(70)}`, "work", "high"],
+    ["Update a.ts, b.ts, c.tsx, d.py and e.json to the new name", "work", "high"],
     ["Design an LRU cache with O(1) get and put", "work", "high"],
     ["Add a dark mode toggle to settings", "work", "medium"],
     ["Fix src/app.ts", "work", "medium"],
@@ -72,6 +77,106 @@ describe("adaptive routing", () => {
       tier: "worker",
       failureCount: 0,
     });
+  });
+
+  it("keeps follow-ups and harness notices on the running task's route", () => {
+    const hard = { tier: "worker", effort: "high" } as const;
+    for (const text of [
+      "any update?",
+      "?",
+      "ten minutes over",
+      "why is this so slow",
+      'Background command "Run the full test suite" completed (exit code 0)',
+      "Continue where you left off.",
+      "where is the config file?",
+      "Before the next step, tell me in plain words where the whole thing stands right now, please",
+    ]) {
+      expect(classifyAdaptiveTask(text, 0, hard), text).toMatchObject(hard);
+    }
+    // Only a fresh standalone question may drop to economy.
+    expect(classifyAdaptiveTask("is it done?", 0)).toMatchObject({ tier: "economy" });
+    expect(
+      classifyAdaptiveTask("is it done?", 0, { tier: "economy", effort: "low" }),
+    ).toMatchObject({ tier: "economy" });
+    expect(classifyAdaptiveTask("Design the authentication architecture", 0, hard)).toMatchObject({
+      tier: "expert",
+    });
+    expect(
+      resolveAdaptiveTurn({
+        selection: auto,
+        capabilities,
+        text: "continue",
+        history: {
+          failureCount: 0,
+          tokens: 0,
+          previousRoute: {
+            tier: "expert",
+            reason: "Architecture or security-critical decision",
+            requestedModel: "deep",
+            requestedEffort: "high",
+          },
+        },
+        nowMs: 0,
+      }),
+    ).toMatchObject({ selection: { model: "deep", options: [{ id: "effort", value: "high" }] } });
+  });
+
+  it("escalates on a failure streak carried by runtime signals and steps back down", () => {
+    const worker = { tier: "worker", effort: "medium" } as const;
+    // Two turns ended with failing tests: the next ping goes to the expert model.
+    const escalated = classifyAdaptiveTask("try again", 2, worker);
+    expect(escalated).toMatchObject({ tier: "expert", effort: "high", failureCount: 2 });
+    expect(classifyAdaptiveTask("is it done?", 2, escalated)).toMatchObject({ tier: "expert" });
+    expect(classifyAdaptiveTask("that is wrong", 1, worker)).toMatchObject({ tier: "expert" });
+    // The expert turn's tests passed (streak 0): follow-ups return to the worker model.
+    expect(classifyAdaptiveTask("what next?", 0, escalated)).toMatchObject({
+      tier: "worker",
+      effort: "high",
+      failureCount: 0,
+    });
+    expect(classifyAdaptiveTask("Implement the next feature", 2, escalated)).toMatchObject({
+      tier: "worker",
+      failureCount: 0,
+    });
+  });
+
+  it("lets the economy-model pre-check place only requests the rules cannot", () => {
+    const economy = { tier: "economy", effort: "low" } as const;
+    const unclear =
+      "Health check for the sub-agent. Do not run any tools or read files. Reply with exactly: OK";
+    expect(classifyAdaptiveTask(unclear, 0)).toMatchObject({ tier: "worker", unclear: true });
+    expect(classifyAdaptiveTask(unclear, 0, undefined, economy)).toMatchObject(economy);
+    expect(
+      classifyAdaptiveTask(unclear, 0, undefined, { tier: "expert", effort: "high" }),
+    ).toMatchObject({ tier: "worker", effort: "high" });
+    expect(classifyAdaptiveTask(`${unclear} ${"x ".repeat(800)}`, 0)).toMatchObject({
+      unclear: false,
+      effort: "high",
+    });
+    // Clear cases, follow-ups on hard work and the safety floor ignore the pre-check.
+    expect(
+      classifyAdaptiveTask("Debug an intermittent deadlock", 0, undefined, economy),
+    ).toMatchObject({ tier: "worker", effort: "high", unclear: false });
+    expect(
+      classifyAdaptiveTask(unclear, 0, { tier: "worker", effort: "high" }, economy),
+    ).toMatchObject({ tier: "worker", effort: "high", unclear: false });
+    expect(
+      classifyAdaptiveTask(
+        "Please update the page so the crash on save is gone for good",
+        0,
+        undefined,
+        economy,
+      ),
+    ).toMatchObject({ tier: "worker" });
+    expect(
+      resolveAdaptiveTurn({
+        selection: auto,
+        capabilities,
+        text: unclear,
+        precheck: economy,
+        nowMs: 0,
+      }),
+    ).toMatchObject({ selection: { model: "quick" } });
   });
 
   it("uses subscription headroom and enforces budget, exhausted windows, and effort overrides", () => {

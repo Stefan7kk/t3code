@@ -5,6 +5,7 @@ import {
   claudeAdaptiveAgents,
   claudeAdaptiveCapabilities,
   claudeAdaptiveDiffTool,
+  claudeAdaptiveTurnFailed,
   withClaudeAdaptiveChoices,
 } from "./claudeAdaptiveRouting.ts";
 
@@ -17,6 +18,17 @@ const reported = (family: string, major: number): ModelInfo => ({
   supportedEffortLevels: ["low", "medium", "high"],
 });
 const runtimeModels = [reported("haiku", 90), reported("sonnet", 90), reported("opus", 90)];
+
+describe("claudeAdaptiveTurnFailed", () => {
+  it("lets the last test run decide and otherwise needs a loop or repeated tool errors", () => {
+    expect(claudeAdaptiveTurnFailed(true, [])).toBe(true);
+    expect(claudeAdaptiveTurnFailed(false, [3, 3])).toBe(false);
+    expect(claudeAdaptiveTurnFailed(undefined, [3])).toBe(true);
+    expect(claudeAdaptiveTurnFailed(undefined, [1, 1, 1, 1, 1])).toBe(true);
+    expect(claudeAdaptiveTurnFailed(undefined, [2, 2])).toBeUndefined();
+    expect(claudeAdaptiveTurnFailed(undefined, [])).toBeUndefined();
+  });
+});
 
 describe("Claude Auto capabilities", () => {
   it("uses native family aliases and runtime efforts for previously unknown versions", () => {

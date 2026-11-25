@@ -171,6 +171,22 @@ function modelVersion(value: string): number[] {
   return match ? match.slice(1).map((part) => Number(part ?? 0)) : [0, 0, 0];
 }
 
+/**
+ * Whether a finished Auto turn struggled. The last test run decides; without one, a loop (one call
+ * failing 3 times) or 5 failed tool calls count. Undefined leaves the failure streak as it was.
+ */
+export function claudeAdaptiveTurnFailed(
+  testFailed: boolean | undefined,
+  toolErrors: Iterable<number>,
+): boolean | undefined {
+  if (testFailed !== undefined) return testFailed;
+  const counts = [...toolErrors];
+  return counts.some((count) => count >= 3) ||
+    counts.reduce((total, count) => total + count, 0) >= 5
+    ? true
+    : undefined;
+}
+
 export function claudeAdaptiveCapabilities(
   instanceId: ModelSelection["instanceId"],
   catalog: ClaudeModelCatalog,

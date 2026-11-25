@@ -607,6 +607,7 @@ export interface ProviderAdapterV2TurnInput {
     readonly failureCount: number;
     readonly tokens: number;
     readonly previousSelection?: ModelSelection;
+    readonly previousRoute?: AdaptiveRoute;
     readonly taskText?: string;
   };
   /** The Auto decision the adapter resolved for this turn; adapters record it on the provider turn. */
