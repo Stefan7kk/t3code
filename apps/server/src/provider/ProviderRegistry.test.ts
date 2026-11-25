@@ -27,6 +27,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import {
   EnvironmentId,
+  ADAPTIVE_SELECTION,
   ClaudeSettings,
   CodexSettings,
   DEFAULT_SERVER_SETTINGS,
@@ -96,6 +97,30 @@ import { providerHostEnvironment } from "../policy/managedProviders.ts";
 vi.mock("@anthropic-ai/claude-agent-sdk", { spy: true });
 
 const decodeServerProvider = Schema.decodeSync(ServerProvider);
+// The fork adds an Auto model and Auto effort choices; upstream catalog assertions compare without them.
+const withoutAuto = (models: ServerProvider["models"]) =>
+  models
+    .filter((model) => model.slug !== ADAPTIVE_SELECTION)
+    .map((model) =>
+      model.capabilities?.optionDescriptors === undefined
+        ? model
+        : {
+            ...model,
+            capabilities: {
+              ...model.capabilities,
+              optionDescriptors: model.capabilities.optionDescriptors.map((descriptor) =>
+                descriptor.type === "select"
+                  ? {
+                      ...descriptor,
+                      options: descriptor.options.filter(
+                        (option) => option.id !== ADAPTIVE_SELECTION,
+                      ),
+                    }
+                  : descriptor,
+              ),
+            },
+          },
+    );
 const encodeServerProvider = Schema.encodeSync(ServerProvider);
 const decodeServerSettings = Schema.decodeSync(ServerSettings);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
@@ -618,7 +643,7 @@ it.layer(
         assert.strictEqual(status.auth.label, "ChatGPT Pro 200 Subscription");
         assert.strictEqual(status.auth.email, "test@example.com");
         assert.deepStrictEqual(status.setup, { canAuthenticate: false, canInstall: false });
-        assert.deepStrictEqual(status.models, [
+        assert.deepStrictEqual(withoutAuto(status.models), [
           {
             slug: "gpt-live-codex",
             name: "GPT Live Codex",
@@ -4748,7 +4773,7 @@ it.layer(
           }),
         );
         const catalogSlugs = new Set(BUNDLED_CLAUDE_MODEL_CATALOG.models.map((m) => m.model.slug));
-        const added = status.models.filter((model) => !catalogSlugs.has(model.slug));
+        const added = withoutAuto(status.models).filter((model) => !catalogSlugs.has(model.slug));
 
         assert.deepStrictEqual(
           added.map((model) => [model.slug, model.name, model.isCustom]),
