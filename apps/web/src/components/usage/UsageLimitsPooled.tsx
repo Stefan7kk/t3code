@@ -38,7 +38,6 @@ import { Button } from "../ui/button";
 import { OpenAI } from "../Icons";
 import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { UsageProviderStatus } from "./UsageProviderStatus";
 import { PaceIcon, ResetCreditDialog, barColor, usePaceMark, useResetCredit } from "./UsageLimits";
 import {
   collectExternalUsageLinks,
@@ -705,7 +704,6 @@ export function UsageLimitsPooled({
           <T>No provider on the selected environments reports subscription limits.</T>
         </p>
       ) : null}
-      <UsageProviderStatus presentations={presentations} now={now} />
       <SegmentPopoverContext value={segmentPopover}>
         {pools.map((pool) => (
           <Fragment key={pool.driver}>

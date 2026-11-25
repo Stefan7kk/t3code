@@ -37,58 +37,6 @@ function managedChatGpt(instanceId: string, displayName: string): ServerProvider
   };
 }
 
-describe("UsageLimitsPooled provider quota status", () => {
-  it("shows exposed fields and marks absent ones unavailable, never unlimited", async () => {
-    const presentations = new Map([
-      [
-        EnvironmentId.make("desk"),
-        {
-          entry: { target: { label: "Desk" } },
-          serverConfig: {
-            providers: [
-              {
-                ...managedChatGpt("claude", "Claude Max"),
-                driver: ProviderDriverKind.make("claudeAgent"),
-                auth: { status: "authenticated" as const, label: "Max 5x" },
-                usageLimits: {
-                  checkedAt,
-                  windows: [
-                    {
-                      id: "session",
-                      kind: "session" as const,
-                      label: "Session",
-                      usedPercent: 100,
-                      resetsAt: "2026-10-25T18:00:00.000Z",
-                    },
-                  ],
-                },
-              },
-              {
-                ...managedChatGpt("grok", "Grok Build"),
-                driver: ProviderDriverKind.make("grok"),
-                auth: { status: "unauthenticated" as const },
-                usageLimits: undefined,
-              },
-            ],
-          },
-        },
-      ],
-    ]);
-    await using screen = await render(
-      <UsageLimitsPooled presentations={presentations} now={Date.parse(checkedAt)} />,
-    );
-
-    const claude = screen.getByRole("row", { name: /Claude Max/ });
-    await expect.element(claude).toMatchTextContent("Max 5x");
-    await expect.element(claude).toMatchTextContent("Limit reached");
-    await expect.element(claude).toMatchTextContent("Signed in");
-    const grok = screen.getByRole("row", { name: /Grok Build/ });
-    await expect.element(grok).toMatchTextContent("Sign-in required");
-    await expect.element(grok).toMatchTextContent("unavailable");
-    await expect.element(screen.getByText(/unlimited/i)).not.toBeInTheDocument();
-  });
-});
-
 describe("UsageLimitsPooled ChatGPT usage card", () => {
   it("names the managed connections it covers", async () => {
     const presentations = new Map([
