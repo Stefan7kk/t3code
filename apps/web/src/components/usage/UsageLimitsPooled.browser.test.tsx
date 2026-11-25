@@ -77,12 +77,12 @@ describe("UsageLimitsPooled provider quota status", () => {
     );
 
     const claude = screen.getByRole("row", { name: /Claude Max/ });
-    await expect.element(claude).toHaveTextContent("Max 5x");
-    await expect.element(claude).toHaveTextContent("Limit reached");
-    await expect.element(claude).toHaveTextContent("Signed in");
+    await expect.element(claude).toMatchTextContent("Max 5x");
+    await expect.element(claude).toMatchTextContent("Limit reached");
+    await expect.element(claude).toMatchTextContent("Signed in");
     const grok = screen.getByRole("row", { name: /Grok Build/ });
-    await expect.element(grok).toHaveTextContent("Sign-in required");
-    await expect.element(grok).toHaveTextContent("unavailable");
+    await expect.element(grok).toMatchTextContent("Sign-in required");
+    await expect.element(grok).toMatchTextContent("unavailable");
     await expect.element(screen.getByText(/unlimited/i)).not.toBeInTheDocument();
   });
 });
