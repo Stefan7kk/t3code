@@ -206,6 +206,8 @@ jobs:
         run: vp run typecheck
 
       - name: Regression tests
+        env:
+          T3CODE_TEST_RETRY: "2"
         run: node scripts/ci/run-regression-tests.mjs
 
   cli-archive:

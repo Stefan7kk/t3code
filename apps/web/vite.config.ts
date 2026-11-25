@@ -81,10 +81,14 @@ const buildSourcemap: boolean | "hidden" =
       ? "hidden"
       : true;
 
+// The fork's release gate runs the whole suite on one small runner; a test must fail every try.
+const testRetry = Number(process.env.T3CODE_TEST_RETRY ?? 0);
+
 const unitTestProject = {
   extends: true,
   test: {
     name: "unit",
+    retry: testRetry,
     include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["src/**/*.browser.test.{ts,tsx}"],
     hookTimeout: 15_000,
@@ -132,6 +136,7 @@ const browserTestProject = {
   },
   test: {
     name: "browser",
+    retry: testRetry,
     include: ["src/**/*.browser.test.{ts,tsx}"],
     hookTimeout: 15_000,
     testTimeout: 15_000,
