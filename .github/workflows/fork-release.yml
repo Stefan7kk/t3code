@@ -37,6 +37,8 @@ concurrency:
 
 env:
   UPSTREAM_REPO: pingdotgg/t3code
+  # gh prefers a remote named "upstream"; pin every gh call to this fork.
+  GH_REPO: ${{ github.repository }}
   GITLEAKS_VERSION: "8.24.3"
 
 jobs:
