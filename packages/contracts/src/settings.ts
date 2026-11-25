@@ -1229,7 +1229,6 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "routingProfile",
   "routingMaxTier",
   "routingTokenBudget",
-  "autoProviderAllowlist",
   "speechProjectCustomWords",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
@@ -1271,7 +1270,6 @@ export const ProjectSettingsOverrides = Schema.Struct({
   routingProfile: Schema.optionalKey(RoutingProfile),
   routingMaxTier: Schema.optionalKey(AdaptiveModelTier),
   routingTokenBudget: Schema.optionalKey(RoutingTokenBudget),
-  autoProviderAllowlist: Schema.optionalKey(Schema.Array(ProviderInstanceId)),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
@@ -1435,10 +1433,6 @@ export const ServerSettings = Schema.Struct({
   ),
   routingTokenBudget: RoutingTokenBudget.pipe(
     Schema.withDecodingDefault(Effect.succeed("unlimited" as const)),
-  ),
-  /** Provider instances Auto may send project context to. Empty authorizes none. */
-  autoProviderAllowlist: Schema.Array(ProviderInstanceId).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
   ),
   agentFeedback: Schema.Struct({
     mode: AgentFeedbackMode.pipe(Schema.withDecodingDefaultKey(Effect.succeed("off" as const))),
@@ -1923,7 +1917,6 @@ export const ServerSettingsPatch = Schema.Struct({
   routingProfile: Schema.optionalKey(RoutingProfile),
   routingMaxTier: Schema.optionalKey(AdaptiveModelTier),
   routingTokenBudget: Schema.optionalKey(RoutingTokenBudget),
-  autoProviderAllowlist: Schema.optionalKey(Schema.Array(ProviderInstanceId)),
   agentFeedback: Schema.optionalKey(Schema.Struct({ mode: AgentFeedbackMode })),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),

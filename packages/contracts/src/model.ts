@@ -5,8 +5,6 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
 
 export const ADAPTIVE_SELECTION = "t3-auto";
-/** Provider-instance sentinel: the server picks an allowlisted provider at turn start. */
-export const AUTO_PROVIDER_INSTANCE_ID = "auto-provider";
 export const AdaptiveModelTier = Schema.Literals(["economy", "worker", "expert"]);
 export type AdaptiveModelTier = typeof AdaptiveModelTier.Type;
 

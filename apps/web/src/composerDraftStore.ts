@@ -1290,9 +1290,6 @@ export function deriveEffectiveComposerModelState(input: {
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
-  if (input.selectedInstanceId === ProviderInstanceId.make("auto-provider")) {
-    return { selectedModel: "t3-auto", modelOptions: null };
-  }
   const draft = draftModelSelectionApplies(input.draft, input.threadStarted) ? input.draft : null;
   const baseSelection = input.threadModelSelection ?? input.projectModelSelection;
   const baseModelCandidate = baseSelection?.model ?? null;

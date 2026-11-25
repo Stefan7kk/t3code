@@ -8,7 +8,6 @@ import { msg, T, useGT, useMessages } from "gt-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import {
-  ADAPTIVE_SELECTION,
   type AdaptiveModelTier,
   type DesktopUpdateChannel,
   IDLE_COMPACTION_MODES,
@@ -2480,21 +2479,6 @@ export function ThreadsSettingsPanel() {
               </Select>
             }
           />
-          <SettingsRow
-            serverScoped
-            settingKeys={["autoProviderAllowlist"]}
-            title={gt("Auto provider allowlist")}
-            description={gt(
-              "Only checked providers may receive project context when Provider is Auto. An empty list authorizes nobody. A provider with no quota reading is not treated as unlimited.",
-            )}
-            control={
-              <AutoProviderAllowlist
-                providers={serverProviders}
-                allowlist={settings.autoProviderAllowlist ?? []}
-                onChange={(autoProviderAllowlist) => updateSettings({ autoProviderAllowlist })}
-              />
-            }
-          />
           {settings.routingProfile === "custom" && !mixedRoutingProfile ? (
             <>
               <SettingsRow
@@ -2572,59 +2556,6 @@ export function ThreadsSettingsPanel() {
         </AdvancedSettings>
       </SettingsSection>
     </SettingsPageContainer>
-  );
-}
-
-function AutoProviderAllowlist({
-  providers,
-  allowlist,
-  onChange,
-}: {
-  readonly providers: ReadonlyArray<{
-    readonly instanceId: ProviderInstanceId;
-    readonly displayName?: string | undefined;
-    readonly enabled: boolean;
-    readonly models: ReadonlyArray<{ readonly slug: string }>;
-  }>;
-  readonly allowlist: ReadonlyArray<ProviderInstanceId>;
-  readonly onChange: (allowlist: ReadonlyArray<ProviderInstanceId>) => void;
-}) {
-  const eligible = providers.filter(
-    (provider) =>
-      provider.enabled && provider.models.some((model) => model.slug === ADAPTIVE_SELECTION),
-  );
-  if (eligible.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        <T>No signed-in provider has advertised Auto yet.</T>
-      </p>
-    );
-  }
-  return (
-    <fieldset className="flex max-w-56 flex-col gap-1">
-      <legend className="sr-only">
-        <T>Auto provider allowlist</T>
-      </legend>
-      {eligible.map((provider) => {
-        const checked = allowlist.includes(provider.instanceId);
-        return (
-          <label key={provider.instanceId} className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => {
-                onChange(
-                  checked
-                    ? allowlist.filter((id) => id !== provider.instanceId)
-                    : [...allowlist, provider.instanceId],
-                );
-              }}
-            />
-            <span className="truncate">{provider.displayName ?? provider.instanceId}</span>
-          </label>
-        );
-      })}
-    </fieldset>
   );
 }
 

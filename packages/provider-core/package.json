@@ -19,10 +19,6 @@
       "types": "./src/server/adaptiveProfiles.ts",
       "import": "./src/server/adaptiveProfiles.ts"
     },
-    "./server/autoProvider": {
-      "types": "./src/server/autoProvider.ts",
-      "import": "./src/server/autoProvider.ts"
-    },
     "./server/adaptiveStats": {
       "types": "./src/server/adaptiveStats.ts",
       "import": "./src/server/adaptiveStats.ts"
