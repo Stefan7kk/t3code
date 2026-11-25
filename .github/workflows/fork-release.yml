@@ -37,8 +37,6 @@ concurrency:
 
 env:
   UPSTREAM_REPO: pingdotgg/t3code
-  # gh prefers a remote named "upstream"; pin every gh call to this fork.
-  GH_REPO: ${{ github.repository }}
   GITLEAKS_VERSION: "8.24.3"
 
 jobs:
@@ -80,7 +78,8 @@ jobs:
             | sed 's|^upstream/||' \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
             | sort -V | tail -n 1 || true)"
-          our_tags="$(gh release list --limit 200 --json tagName --jq '.[].tagName' | tr '\n' ',' | sed 's/,$//')"
+          # gh prefers the "upstream" remote added above; read this fork's releases explicitly.
+          our_tags="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName' | tr '\n' ',' | sed 's/,$//')"
           latest_plain="$(node -e "
             import('./scripts/fork/forkVersion.mjs').then((m) => {
               const tags = process.argv[1].split(',').filter(Boolean);
@@ -412,7 +411,7 @@ jobs:
             echo "Rollback: keep the previous installer; pre-update state backups live in userdata/backups."
           } > release-notes.md
           sha256sum release/T3-Code-"$VERSION"-x64.exe release/latest.yml release/*.blockmap > release/SHA256SUMS
-          gh release create "v${VERSION}" \
+          gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" \
             --title "T3 Code Enhanced ${VERSION} (fork)" \
             --notes-file release-notes.md \
             --latest \
