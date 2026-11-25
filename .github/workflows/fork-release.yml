@@ -127,12 +127,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "mode=$mode version=$version upstream_tag=$upstream_tag should_release=$should_release"
 
-  gate:
-    name: Merge, secret scan, regression tests
+  checks:
+    name: Merge, secret scan, lint, typecheck
     needs: detect
     if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -186,6 +186,80 @@ jobs:
         with:
           install-args: --frozen-lockfile
 
+      - name: Fork versioning tests
+        run: node --test scripts/fork/forkVersionNodeTest.mjs scripts/ci/browserInfraRetryCheck.mjs
+
+      - name: Lint
+        run: vp run lint
+
+      - name: Typecheck
+        run: vp run typecheck
+
+  # Sharded like upstream release.yml (test, test_web, test_server): the server suite alone ran
+  # ~29 minutes on one runner, and the web browser tests time out when they share its CPU.
+  tests:
+    name: Regression tests (${{ matrix.suite }})
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: packages
+            args: run --parallel --concurrency-limit 4 --filter '!t3' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' test
+          - suite: web 1/2
+            args: run --filter @t3tools/web test --shard 1/2
+          - suite: web 2/2
+            args: run --filter @t3tools/web test --shard 2/2
+          - suite: server 1/4
+            args: run --filter t3 test --shard 1/4
+          - suite: server 2/4
+            args: run --filter t3 test --shard 2/4
+          - suite: server 3/4
+            args: run --filter t3 test --shard 3/4
+          - suite: server 4/4
+            args: run --filter t3 test --shard 4/4
+    steps:
+      - name: Checkout fork main
+        shell: bash
+        env:
+          MAIN_SHA: ${{ needs.detect.outputs.main_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git init --initial-branch=main .
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --no-tags --prune --no-recurse-submodules origin "+refs/heads/*:refs/remotes/origin/*"
+          git checkout --force "$MAIN_SHA"
+          git log -1 --format=%H
+
+      - name: Merge upstream stable
+        if: needs.detect.outputs.upstream_tag != ''
+        shell: bash
+        env:
+          UPSTREAM_TAG: ${{ needs.detect.outputs.upstream_tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Refusing non-stable upstream tag: $UPSTREAM_TAG"
+            exit 1
+          fi
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --no-tags upstream "+refs/tags/${UPSTREAM_TAG}:refs/tags/upstream/${UPSTREAM_TAG}"
+          git config user.name "t3-fork-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git merge --no-ff "upstream/${UPSTREAM_TAG}" \
+            -m "chore: merge upstream ${UPSTREAM_TAG} into the enhanced fork"
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --frozen-lockfile
+
       - name: Install browser test runtime
         run: |
           node apps/web/node_modules/playwright/cli.js install --only-shell chromium
@@ -196,19 +270,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsecret-1-dev pkg-config
 
-      - name: Fork versioning tests
-        run: node --test scripts/fork/forkVersionNodeTest.mjs scripts/ci/browserInfraRetryCheck.mjs
-
-      - name: Lint
-        run: vp run lint
-
-      - name: Typecheck
-        run: vp run typecheck
-
       - name: Regression tests
         env:
           T3CODE_TEST_RETRY: "2"
-        run: node scripts/ci/run-regression-tests.mjs
+        run: node scripts/ci/run-regression-tests.mjs ${{ matrix.args }}
+
+  # One job the publish step waits on. A failed or cancelled check or shard skips this job,
+  # and a skipped gate blocks publishing.
+  gate:
+    name: Regression gate
+    needs: [checks, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: All checks and test shards passed
+        run: echo "gate passed"
 
   cli-archive:
     name: Linux CLI archive (WSL runtime)
@@ -472,7 +549,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          job="Merge, secret scan, regression tests"
+          job="Regression gate"
           for _ in $(seq 1 180); do
             state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"               --jq ".jobs[] | select(.name == \"$job\") | .status + \" \" + (.conclusion // \"\")")"
             echo "gate: ${state:-pending}"
@@ -530,7 +607,7 @@ jobs:
 
   notify-failure:
     name: Report pipeline failure
-    needs: [detect, gate, cli-archive, build-publish]
+    needs: [detect, checks, tests, gate, cli-archive, build-publish]
     if: failure() && needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5

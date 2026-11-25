@@ -3,10 +3,12 @@ import * as NodeChildProcess from "node:child_process";
 import { isBrowserConnectionDrop } from "./browserInfraRetry.mjs";
 
 const attempts = 3;
+// Extra arguments pick one shard, e.g. `run --filter t3 test --shard 1/4`.
+const vpArgs = process.argv.length > 2 ? process.argv.slice(2) : ["run", "test"];
 
 function runOnce() {
   return new Promise((resolve) => {
-    const child = NodeChildProcess.spawn("vp", ["run", "test"], {
+    const child = NodeChildProcess.spawn("vp", vpArgs, {
       stdio: ["inherit", "pipe", "pipe"],
       shell: true,
     });
