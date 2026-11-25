@@ -210,7 +210,9 @@ jobs:
 
   cli-archive:
     name: Linux CLI archive (WSL runtime)
-    needs: [detect, gate]
+    # Builds only an artifact, so it runs beside the gate; publishing still needs both.
+    needs: detect
+    if: needs.detect.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
