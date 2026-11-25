@@ -154,7 +154,6 @@ import {
   type ProviderThreadId,
   type RunId,
   type ThreadId,
-  type TurnTokenUsage,
   resolveIdleCompaction,
   isDelegatedAppThread,
 } from "@t3tools/contracts";
@@ -7600,59 +7599,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             : { model: input.context.executedModel }),
         });
 
-        const adaptiveRoutingNotice = Effect.fn("ClaudeAdapterV2.adaptiveRoutingNotice")(function* (
-          context: ActiveClaudeTurnContext,
-          at: DateTime.Utc,
-          usage?: TurnTokenUsage,
-        ) {
-          const route = context.adaptiveRoute;
-          if (!route) return;
-          const nativeItemId = `adaptive-routing:${context.providerTurnId}`;
-          const inputTokens = usage?.inputTokens;
-          const outputTokens = usage?.outputTokens;
-          const usageText =
-            inputTokens === undefined && outputTokens === undefined
-              ? "Token usage unavailable"
-              : `${inputTokens ?? "unknown"} input · ${outputTokens ?? "unknown"} output${usage?.cachedInputTokens === undefined ? "" : ` · ${usage.cachedInputTokens} cache reads`}${usage?.otherUsage === undefined ? "" : ` · ${usage.otherUsage.inputTokens + usage.otherUsage.outputTokens} additional provider tokens`}`;
-          const observedModel = [...context.rootModels].join(", ") || "Unreported";
-          const message = `Auto · ${route.reason}. Model: ${observedModel}. Effective effort: ${route.effectiveEffort ?? "unreported"}. ${usageText}.${
-            context.rootModels.size > 0 && !context.rootModels.has(route.requestedModel)
-              ? ` Requested ${route.requestedModel}.`
-              : ""
-          }${
-            route.requestedEffort !== undefined &&
-            route.effectiveEffort !== undefined &&
-            route.requestedEffort !== route.effectiveEffort
-              ? ` Requested effort ${route.requestedEffort}.`
-              : ""
-          }`;
-          yield* emitProviderEvent({
-            type: "turn_item.updated",
-            driver: CLAUDE_PROVIDER,
-            turnItem: {
-              id: idAllocator.derive.turnItemFromProviderItem({
-                driver: CLAUDE_PROVIDER,
-                nativeItemId,
-              }),
-              threadId: context.input.threadId,
-              runId: context.input.runId,
-              nodeId: context.input.rootNodeId,
-              providerThreadId: context.input.providerThread.id,
-              providerTurnId: context.providerTurnId,
-              nativeItemRef: { driver: CLAUDE_PROVIDER, nativeId: nativeItemId, strength: "weak" },
-              parentItemId: null,
-              ordinal: yield* resolveItemOrdinal(context, nativeItemId),
-              type: "system_notice",
-              status: "completed",
-              title: message,
-              message,
-              startedAt: at,
-              completedAt: at,
-              updatedAt: at,
-            },
-          });
-        });
-
         const buildToolCallArtifacts = (input: {
           readonly context: ActiveClaudeTurnContext | null;
           readonly nativeItemId: string;
@@ -10237,7 +10183,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   }),
             },
           );
-          yield* adaptiveRoutingNotice(input.context, input.completedAt, turnTokenUsage);
           yield* Effect.all(
             [
               emitProviderEvent({

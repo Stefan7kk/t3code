@@ -2,11 +2,19 @@ import type {
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
 } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
+import { Atom } from "effect/reactivity";
 import { msg, T, useGT, useMessages } from "gt-react";
+
+import { useQuietThreadProjection } from "../../state/entities";
+import { environmentCatalog } from "../../connection/catalog";
+import { environmentThreadShells } from "../../state/threads";
 
 import {
   buildRoutingRows,
   estimateSavings,
+  lastVisitedThreadRef,
   sumMeasuredTokens,
   type RoutingEvent,
   type RoutingPrice,
@@ -27,11 +35,33 @@ function eventLabel(event: RoutingEvent | undefined, resolve: ReturnType<typeof 
     : resolve(msg("De-escalated {from} to {to}", { from: event.from, to: event.to }));
 }
 
+const lastVisitedThreadRefAtom = Atom.make((get) =>
+  lastVisitedThreadRef(
+    [...enabledEnvironmentIds(get(environmentCatalog.catalogValueAtom))].flatMap((environmentId) =>
+      get(environmentThreadShells.environmentThreadsAtom(environmentId)).map((thread) => ({
+        ref: { environmentId, threadId: thread.id },
+        lastVisitedAt: thread.lastVisitedAt,
+      })),
+    ),
+  ),
+).pipe(Atom.withLabel("web-last-visited-thread-ref"));
+
+/** Usage page section. The chat itself stays free of routing notices. */
+export function LastThreadRoutingHistory() {
+  const projection = useQuietThreadProjection(useAtomValue(lastVisitedThreadRefAtom))?.projection;
+  return projection ? (
+    <RoutingHistoryPanel
+      providerTurns={projection.providerTurns}
+      providerThreads={projection.providerThreads}
+    />
+  ) : null;
+}
+
 /**
  * Auto routing history. Token counts are MEASURED from the provider; dollar figures are ESTIMATES
  * and appear only where `priceFor` knows a model's price. "n/a" means the provider did not report it.
  */
-export function RoutingHistoryPanel({
+function RoutingHistoryPanel({
   providerTurns,
   providerThreads,
   priceFor,
@@ -73,7 +103,7 @@ export function RoutingHistoryPanel({
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-sm font-medium text-foreground">
-        <T>Auto routing history</T>
+        <T>Auto routing history (last opened thread)</T>
       </h2>
       <p className="text-xs text-muted-foreground">
         <T>Measured tokens</T>: {formatTokens(measured.inputTokens, unavailable)} <T>input</T> ·{" "}

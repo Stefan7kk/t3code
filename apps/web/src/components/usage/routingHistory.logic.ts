@@ -2,7 +2,29 @@ import type {
   AdaptiveModelTier,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
+  ScopedThreadRef,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+
+/** The thread opened most recently, or null when none carries a visit mark. */
+export function lastVisitedThreadRef(
+  threads: Iterable<{
+    readonly ref: ScopedThreadRef;
+    readonly lastVisitedAt?: DateTime.Utc | null | undefined;
+  }>,
+): ScopedThreadRef | null {
+  let latest: ScopedThreadRef | null = null;
+  let latestAt = Number.NEGATIVE_INFINITY;
+  for (const thread of threads) {
+    if (thread.lastVisitedAt == null) continue;
+    const at = DateTime.toEpochMillis(thread.lastVisitedAt);
+    if (at > latestAt) {
+      latest = thread.ref;
+      latestAt = at;
+    }
+  }
+  return latest;
+}
 
 /** USD per million tokens, from a price table the caller trusts. */
 export interface RoutingPrice {

@@ -80,6 +80,7 @@ import {
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
+import { LastThreadRoutingHistory } from "./RoutingHistoryPanel";
 import { UsageProviderChart } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
 import { UsageShareBar } from "./UsageShareBar";
@@ -576,6 +577,7 @@ export function UsagePage() {
                 onSelectModel={selectUsageModel}
               />
             )}
+            <LastThreadRoutingHistory />
           </WorkspacePageContainer>
         </ScrollArea>
       </div>

@@ -1,13 +1,16 @@
 import type {
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
+  ScopedThreadRef,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildRoutingRows,
   estimateSavings,
   estimateTurnCostUsd,
+  lastVisitedThreadRef,
   sumMeasuredTokens,
   type RoutingPrice,
 } from "./routingHistory.logic";
@@ -183,5 +186,22 @@ describe("measured totals and savings", () => {
         baselinePrice: prices.big,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("lastVisitedThreadRef", () => {
+  const ref = (threadId: string) => ({ environmentId: "desk", threadId }) as ScopedThreadRef;
+  const at = (iso: string) => DateTime.makeUnsafe(iso);
+
+  it("picks the newest visit and skips threads never opened", () => {
+    expect(
+      lastVisitedThreadRef([
+        { ref: ref("old"), lastVisitedAt: at("2026-11-24T10:00:00Z") },
+        { ref: ref("never"), lastVisitedAt: null },
+        { ref: ref("new"), lastVisitedAt: at("2026-11-25T09:00:00Z") },
+        { ref: ref("unset") },
+      ]),
+    ).toEqual(ref("new"));
+    expect(lastVisitedThreadRef([{ ref: ref("never"), lastVisitedAt: null }])).toBeNull();
   });
 });
