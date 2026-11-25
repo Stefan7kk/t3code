@@ -30,6 +30,11 @@ describe("adaptive routing", () => {
     ["Debug an intermittent deadlock", "work", "high"],
     ["Design the authentication architecture", "deep", "high"],
     ["Review the pending diff", "work", "medium"],
+    ["Reply with just OK", "quick", "low"],
+    ["thanks, what does this error mean?", "quick", "low"],
+    ["Design an LRU cache with O(1) get and put", "work", "high"],
+    ["Add a dark mode toggle to settings", "work", "medium"],
+    ["Fix src/app.ts", "work", "medium"],
   ])("routes %s", (text, model, effort) => {
     expect(resolveAdaptiveTurn({ selection: auto, capabilities, text, nowMs: 0 })).toMatchObject({
       selection: { model, options: [{ id: "effort", value: effort }] },
@@ -74,7 +79,10 @@ describe("adaptive routing", () => {
     expect(
       resolveAdaptiveTurn({ ...base, tokenBudget: 100, history: { tokens: 100, failureCount: 0 } }),
     ).toHaveProperty("error");
-    expect(resolveAdaptiveTurn({ ...base, maxTier: "economy" })).toHaveProperty("error");
+    expect(resolveAdaptiveTurn({ ...base, maxTier: "economy" })).toMatchObject({
+      selection: { model: "quick" },
+      route: { tier: "economy", reason: expect.stringContaining("capped at economy") },
+    });
     expect(
       resolveAdaptiveTurn({ ...base, capabilities: { ...capabilities, fixedEffort: "high" } }),
     ).toHaveProperty("error");

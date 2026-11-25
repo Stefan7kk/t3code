@@ -140,7 +140,9 @@ describe("Codex Auto capabilities", () => {
         nowMs: 0,
         maxTier: "economy",
       }),
-    ).toHaveProperty("error");
+    ).toMatchObject({
+      route: { tier: "economy", reason: expect.stringContaining("capped at economy") },
+    });
   });
 
   it.effect("sends the resolved Auto model and effort on the wire, not the Auto placeholder", () =>

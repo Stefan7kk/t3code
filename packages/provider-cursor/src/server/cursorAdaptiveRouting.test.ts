@@ -151,7 +151,9 @@ describe("Cursor Auto capabilities", () => {
         ...auto,
         options: [...(auto.options ?? []), { id: "autoMaxTier", value: "economy" }],
       }),
-    ).toHaveProperty("error");
+    ).toMatchObject({
+      route: { tier: "economy", reason: expect.stringContaining("capped at economy") },
+    });
     const limited = (usedPercent: number) =>
       resolveCursorAdaptiveSelection({
         selection: auto,

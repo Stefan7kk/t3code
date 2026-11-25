@@ -146,7 +146,10 @@ describe("OpenCode Auto capabilities", () => {
         options: [{ id: "variant", value: "high" }],
       },
     });
-    expect(resolve("Design the authentication architecture", "worker")).toHaveProperty("error");
+    expect(resolve("Design the authentication architecture", "worker")).toMatchObject({
+      selection: { model: "opencode-go/gpt-6-luna" },
+      route: { tier: "worker", reason: expect.stringContaining("capped at worker") },
+    });
   });
 
   it("de-escalates near a Go limit and blocks an exhausted one", () => {

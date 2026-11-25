@@ -209,7 +209,7 @@ describe("makeQwenAdaptiveResolver", () => {
         }),
       );
       expect(decision).toMatchObject({
-        error: expect.stringContaining("above the Auto tier limit"),
+        route: { tier: "worker", reason: expect.stringContaining("capped at worker") },
       });
     }),
   );

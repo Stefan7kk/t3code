@@ -83,6 +83,13 @@ export function classifyAdaptiveTask(text: string, priorFailures: number) {
   ) {
     return route("worker", "high", "Debugging or a reported failure");
   }
+  if (
+    /\b(?:design|algorithm|data structure|trade-?offs?|optimi[sz]e|concurren\w*|scalab\w*|performance)\b/i.test(
+      task,
+    )
+  ) {
+    return route("worker", "high", "Design or algorithmic work");
+  }
   if (/\b(?:audit|review)\b/i.test(task)) return route("worker", "medium", "Independent review");
   if (/^(?:please\s+)?(?:map|explore|trace)\b/i.test(task)) {
     return route("economy", "low", "Repository exploration");
@@ -96,6 +103,17 @@ export function classifyAdaptiveTask(text: string, priorFailures: number) {
     return route("economy", "low", "Lookup");
   if (/\b(?:typo|rename|formatting|simple fix|small fix|one-line)\b/i.test(task)) {
     return route("worker", "low", "Small implementation change");
+  }
+  // Short chat with no code and no change request needs no worker model.
+  if (
+    !continuation &&
+    task.split(/\s+/).length <= 12 &&
+    !/[`{}<>]|\w\.\w{1,5}\b|\/\w/.test(task) &&
+    !/\b(?:fix|change|add|implement|debug|migrate|refactor|write|build|create|update|remove|delete|test|run|install|deploy|edit)\b/i.test(
+      task,
+    )
+  ) {
+    return route("economy", "low", "Short or conversational request");
   }
   return route("worker", "medium", "Implementation or general work");
 }
@@ -118,8 +136,19 @@ export function resolveAdaptiveTurn(input: {
         "This thread reached its Auto token budget. Increase the budget or use a manual selection.",
     };
   }
-  const requested = classifyAdaptiveTask(input.text, input.history?.failureCount ?? 0);
+  const classified = classifyAdaptiveTask(input.text, input.history?.failureCount ?? 0);
   const modelAuto = selection.model === ADAPTIVE_SELECTION;
+  // The tier cap is a spending ceiling: route to the best allowed tier rather than refusing.
+  const requested =
+    modelAuto &&
+    input.maxTier !== undefined &&
+    tiers.indexOf(classified.tier) > tiers.indexOf(input.maxTier)
+      ? {
+          ...classified,
+          tier: input.maxTier,
+          reason: `${classified.reason} (capped at ${input.maxTier})`,
+        }
+      : classified;
   const effortOptionIds = Array.from(
     new Set([
       capabilities.effortOptionId,
@@ -150,13 +179,6 @@ export function resolveAdaptiveTurn(input: {
     windows.some((window) => !window.modelIds && window.usedPercent >= 100)
   ) {
     return { error: "The provider reports an exhausted usage or spend limit." };
-  }
-  if (
-    modelAuto &&
-    input.maxTier !== undefined &&
-    tiers.indexOf(requested.tier) > tiers.indexOf(input.maxTier)
-  ) {
-    return { error: `This task needs the ${requested.tier} tier, above the Auto tier limit.` };
   }
   const matching = modelAuto
     ? capabilities.models.filter((model) => model.tier === requested.tier)
