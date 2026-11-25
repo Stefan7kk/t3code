@@ -320,7 +320,8 @@ jobs:
     # Builds beside the regression gate; the "Wait for regression gate" step blocks push and publish.
     needs: [detect, cli-archive]
     if: needs.detect.outputs.should_release == 'true'
-    runs-on: windows-latest
+    # Cross-builds like upstream release-desktop.yml; a Windows host packs extra native files.
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
       contents: write
@@ -370,8 +371,30 @@ jobs:
         with:
           install-args: --frozen-lockfile
 
-      - name: Ensure Electron runtime
-        run: vp run --filter @t3tools/desktop ensure:electron
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install cargo-xwin
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-xwin@0.23.1
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.detect.outputs.version }}"
+
+      - name: Build JS bundle
+        env:
+          T3CODE_TELEMETRY_CHANNEL: dev
+        run: vp run build:desktop:bundle
+
+      - name: Apply web client branding
+        run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
+
+      - name: Build resource monitor
+        run: cargo xwin build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target x86_64-pc-windows-msvc
 
       - name: Enable T3 Connect public configuration
         shell: bash
@@ -382,12 +405,14 @@ jobs:
         env:
           VERSION: ${{ needs.detect.outputs.version }}
           T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: true
         run: |
           set -euo pipefail
           wsl_runtime="$(ls release-cli/t3-*-linux-x64.tar.gz | head -n 1)"
           node scripts/build-desktop-artifact.ts \
             --platform win --target nsis --arch x64 \
             --build-version "$VERSION" \
+            --skip-build --verbose \
             --wsl-runtime "$wsl_runtime" \
             --output-dir release
 
@@ -420,12 +445,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="gitleaks_${GITLEAKS_VERSION}_windows_x64.zip"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}" -o "$archive"
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" -o checksums.txt
           grep " ${archive}\$" checksums.txt | sha256sum -c -
-          unzip -o "$archive" gitleaks.exe
-          ./gitleaks.exe dir release --redact --no-banner --exit-code 1
+          tar -xzf "$archive" gitleaks
+          ./gitleaks dir release --redact --no-banner --exit-code 1
 
       - name: Wait for regression gate
         shell: bash
