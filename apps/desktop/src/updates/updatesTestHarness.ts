@@ -269,6 +269,10 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     },
     exists: (path) => Effect.succeed(!deletedFiles.has(path)),
     makeDirectory: () => Effect.void,
+    // The pre-install state backup copies files that `exists` reports; accept those writes.
+    copyFile: () => Effect.void,
+    copy: () => Effect.void,
+    readDirectory: () => Effect.succeed([]),
     writeFileString: (path, data) =>
       Effect.sync(() => {
         if (isInstallRecord(path)) installRecords.set(path, data);
