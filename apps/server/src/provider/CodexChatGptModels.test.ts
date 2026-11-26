@@ -113,3 +113,36 @@ it.effect("does not present a cached catalog as account entitlements when discov
     assert.strictEqual(error._tag, "ChatGptCatalogError");
   }),
 );
+
+it.effect("keeps the Auto model entry the catalog does not know", () =>
+  Effect.gen(function* () {
+    const http = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          new Response(
+            JSON.stringify({
+              models: [
+                {
+                  slug: "gpt-x",
+                  display_name: "GPT X",
+                  visibility: "list",
+                  default_reasoning_level: null,
+                  supported_reasoning_levels: null,
+                },
+              ],
+            }),
+          ),
+        ),
+      ),
+    );
+    const auto = { slug: "t3-auto", name: "Auto", isCustom: false, capabilities: null };
+    const models = yield* chatGptModels("token", [auto]).pipe(
+      Effect.provideService(HttpClient.HttpClient, http),
+    );
+    assert.deepEqual(
+      models.map((model) => model.slug),
+      ["gpt-x", "t3-auto"],
+    );
+  }),
+);

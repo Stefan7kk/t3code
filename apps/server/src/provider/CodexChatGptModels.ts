@@ -1,4 +1,4 @@
-import type { ServerProviderModel } from "@t3tools/contracts";
+import { ADAPTIVE_SELECTION, type ServerProviderModel } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
@@ -42,7 +42,7 @@ export const chatGptModels = Effect.fn("chatGptModels")(function* (
   );
   if (response.status !== 200) return yield* new ChatGptCatalogError({ status: response.status });
   const catalog = yield* response.json.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Catalog)));
-  return catalog.models
+  const listed = catalog.models
     .filter((model) => model.visibility === "list")
     .map((model): ServerProviderModel => {
       const native = nativeModels.find((candidate) => candidate.slug === model.slug);
@@ -71,4 +71,6 @@ export const chatGptModels = Effect.fn("chatGptModels")(function* (
         isCustom: false,
       };
     });
+  // The catalog knows no Auto model; keep the one Codex's own list carries so the picker offers it.
+  return [...listed, ...nativeModels.filter((model) => model.slug === ADAPTIVE_SELECTION)];
 }, Effect.timeout("15 seconds"));

@@ -911,19 +911,18 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const tierOption = getModelSelectionStringOptionValue(selection, "autoMaxTier");
       const budget = Number(getModelSelectionStringOptionValue(selection, "autoTokenBudget"));
       const usageLimits = yield* connection.usageLimits(directory);
+      // A directory the server has just started lists models without their reasoning levels, or none;
+      // the catalog is the same everywhere, so take each model's levels from any directory that has them.
+      const known = new Map<string, ReadonlySet<string>>();
+      for (const key of [directory, ...modelVariants.keys()]) {
+        for (const [slug, levels] of modelVariants.get(key) ?? []) {
+          if ((known.get(slug)?.size ?? 0) === 0) known.set(slug, levels);
+        }
+      }
       const decision = resolveAdaptiveTurn({
         selection,
         capabilities: {
-          ...openCodeAdaptiveCapabilities(
-            instanceId,
-            openCodeModelsFromVariants(
-              // A directory the server has just started lists no models yet; the catalog is the same
-              // everywhere, so borrow the list of one that has it.
-              [directory, ...modelVariants.keys()]
-                .map((key) => modelVariants.get(key))
-                .find((variants) => variants !== undefined && variants.size > 0) ?? new Map(),
-            ),
-          ),
+          ...openCodeAdaptiveCapabilities(instanceId, openCodeModelsFromVariants(known)),
           ...(usageLimits ? { usageLimits } : {}),
         },
         text,
@@ -932,6 +931,12 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         ...(Number.isSafeInteger(budget) && budget > 0 ? { tokenBudget: budget } : {}),
         nowMs: DateTime.toEpochMillis(yield* DateTime.now),
       });
+      if ("error" in decision && decision.error.startsWith("No available")) {
+        const withLevels = [...known.values()].filter((levels) => levels.size > 0).length;
+        return {
+          error: `${decision.error} OpenCode listed ${known.size} models, ${withLevels} with reasoning levels.`,
+        };
+      }
       return decision;
     });
     const now = yield* DateTime.now;
