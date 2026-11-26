@@ -386,9 +386,10 @@ export function resolveAdaptiveTurn(input: {
       : requested.effort;
   const wireEffort = (effort: Effort) => model.effortByLevel?.[effort] ?? effort;
   const supported = efforts.filter((effort) => model.efforts.includes(wireEffort(effort)));
-  const autoEffort = supported.findLast(
-    (level) => efforts.indexOf(level) <= efforts.indexOf(preferredEffort),
-  );
+  // A model whose lowest level is above the wanted one (e.g. only high/max) uses that lowest level.
+  const autoEffort =
+    supported.findLast((level) => efforts.indexOf(level) <= efforts.indexOf(preferredEffort)) ??
+    supported[0];
   const effort = effortAuto
     ? autoEffort === undefined
       ? undefined
@@ -396,8 +397,6 @@ export function resolveAdaptiveTurn(input: {
     : typeof requestedEffort === "string" && requestedEffort !== "default"
       ? requestedEffort
       : undefined;
-  if (effortAuto && effort === undefined && model.efforts.length > 0)
-    return { error: "No supported effort fits this Auto route. Choose an effort manually." };
   const modelEffortOptionId = model.effortOptionId ?? capabilities.effortOptionId;
   const options = selection.options?.filter(({ id }) => !effortOptionIds.includes(id)) ?? [];
   if (effort !== undefined) options.push({ id: modelEffortOptionId, value: effort });

@@ -142,6 +142,23 @@ describe("adaptive routing", () => {
     expect(resolve("economy")).toHaveProperty("error");
   });
 
+  it("uses the lowest supported effort when a model only offers levels above the wanted one", () => {
+    const highOnly: AdaptiveProviderCapabilities = {
+      ...capabilities,
+      models: capabilities.models.map((model) =>
+        model.tier === "economy" ? { ...model, efforts: ["high", "max"] } : model,
+      ),
+    };
+    const result = resolveAdaptiveTurn({
+      selection: auto,
+      capabilities: highOnly,
+      text: "Reply with exactly one word: OK",
+      nowMs: 0,
+    });
+    expect(result).not.toHaveProperty("error");
+    expect(result).toMatchObject({ selection: { options: [{ id: "effort", value: "high" }] } });
+  });
+
   it("caps follow-ups at worker/high unless failures hold the escalation", () => {
     const expert = {
       tier: "expert",
