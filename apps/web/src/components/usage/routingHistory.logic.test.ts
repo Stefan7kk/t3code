@@ -157,35 +157,29 @@ describe("measured totals and savings", () => {
     });
   });
 
-  it("estimates savings only over priced turns", () => {
+  it("prices measured tokens on the thread's worker model, skipping unpriced turns", () => {
+    const turn = (model: string, tier: "economy" | "worker", tokens: number) =>
+      ({
+        model,
+        adaptiveRoute: { tier, reason: "x", requestedModel: model },
+        turnTokenUsage: { inputTokens: tokens, outputTokens: 0 },
+      }) as unknown as OrchestrationV2ProviderTurn;
+    const rates: Record<string, number> = { small: 1, mid: 3 };
     const savings = estimateSavings({
-      providerTurns: turns,
-      priceFor: (model) => prices[model],
-      baselinePrice: prices.big,
+      providerTurns: [
+        turn("mid", "worker", 1_000_000),
+        turn("small", "economy", 1_000_000),
+        turn("mystery", "economy", 1_000_000),
+      ],
+      ratePerMillion: (model) => rates[model],
     });
-    // actual: 3M*$1 + 0.1M*$4 = $3.4; baseline: 3M*$10 + 0.1M*$40 = $34.
-    expect(savings?.pricedTurns).toBe(2);
-    expect(savings?.totalTurns).toBe(4);
-    expect(savings?.actualUsd).toBeCloseTo(3.4, 6);
-    expect(savings?.baselineUsd).toBeCloseTo(34, 6);
-    expect(savings?.savedUsd).toBeCloseTo(30.6, 6);
+    // actual $3 + $1; the same tokens on the worker model $3 + $3; the unpriced turn is excluded.
+    expect(savings).toMatchObject({ baselineModel: "mid", pricedTurns: 2, totalTurns: 3 });
+    expect(savings?.savedUsd).toBeCloseTo(2, 6);
   });
 
-  it("omits the estimate without a baseline price or any priced turn", () => {
-    expect(
-      estimateSavings({
-        providerTurns: turns,
-        priceFor: (m) => prices[m],
-        baselinePrice: undefined,
-      }),
-    ).toBeUndefined();
-    expect(
-      estimateSavings({
-        providerTurns: turns,
-        priceFor: () => undefined,
-        baselinePrice: prices.big,
-      }),
-    ).toBeUndefined();
+  it("omits the estimate without a priced worker model", () => {
+    expect(estimateSavings({ providerTurns: [], ratePerMillion: () => 1 })).toBeUndefined();
   });
 });
 

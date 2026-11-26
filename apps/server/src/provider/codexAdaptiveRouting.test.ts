@@ -115,8 +115,14 @@ describe("Codex Auto capabilities", () => {
       model: ADAPTIVE_SELECTION,
       options: [{ id: "reasoningEffort", value: ADAPTIVE_SELECTION }],
     };
-    const resolve = (text: string) =>
-      resolveAdaptiveTurn({ selection: auto, capabilities, text, nowMs: 0 });
+    const resolve = (text: string, failureCount = 0) =>
+      resolveAdaptiveTurn({
+        selection: auto,
+        capabilities,
+        text,
+        history: { failureCount, tokens: 0 },
+        nowMs: 0,
+      });
     expect(resolve("Find where the folder is defined")).toMatchObject({
       selection: {
         model: "gpt-5.6-codex-mini",
@@ -126,7 +132,7 @@ describe("Codex Auto capabilities", () => {
     expect(resolve("Implement a save button")).toMatchObject({
       selection: { model: "gpt-6-astra", options: [{ id: "reasoningEffort", value: "medium" }] },
     });
-    expect(resolve("Design the authentication architecture")).toMatchObject({
+    expect(resolve("try again", 2)).toMatchObject({
       selection: {
         model: "gpt-5.6-codex-max",
         options: [{ id: "reasoningEffort", value: "high" }],

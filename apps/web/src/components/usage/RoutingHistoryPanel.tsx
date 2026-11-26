@@ -5,11 +5,13 @@ import type {
 import { useAtomValue } from "@effect/atom-react";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { Atom } from "effect/reactivity";
+import type { ModelTotals } from "@t3tools/shared/usageMerge";
 import { msg, T, useGT, useMessages } from "gt-react";
 
 import { useQuietThreadProjection } from "../../state/entities";
 import { environmentCatalog } from "../../connection/catalog";
 import { environmentThreadShells } from "../../state/threads";
+import { costPerMillionTokens } from "./usageBreakdown";
 
 import {
   buildRoutingRows,
@@ -17,7 +19,6 @@ import {
   lastVisitedThreadRef,
   sumMeasuredTokens,
   type RoutingEvent,
-  type RoutingPrice,
 } from "./routingHistory.logic";
 
 const number = new Intl.NumberFormat();
@@ -47,12 +48,16 @@ const lastVisitedThreadRefAtom = Atom.make((get) =>
 ).pipe(Atom.withLabel("web-last-visited-thread-ref"));
 
 /** Usage page section. The chat itself stays free of routing notices. */
-export function LastThreadRoutingHistory() {
+export function LastThreadRoutingHistory({ models }: { readonly models: readonly ModelTotals[] }) {
   const projection = useQuietThreadProjection(useAtomValue(lastVisitedThreadRefAtom))?.projection;
   return projection ? (
     <RoutingHistoryPanel
       providerTurns={projection.providerTurns}
       providerThreads={projection.providerThreads}
+      ratePerMillion={(model) => {
+        const found = models.find((candidate) => candidate.model === model);
+        return found === undefined ? undefined : (costPerMillionTokens(found) ?? undefined);
+      }}
     />
   ) : null;
 }
@@ -64,14 +69,12 @@ export function LastThreadRoutingHistory() {
 function RoutingHistoryPanel({
   providerTurns,
   providerThreads,
-  priceFor,
-  baselineModel,
+  ratePerMillion,
 }: {
   readonly providerTurns: ReadonlyArray<OrchestrationV2ProviderTurn>;
   readonly providerThreads: ReadonlyArray<Pick<OrchestrationV2ProviderThread, "id" | "driver">>;
-  readonly priceFor?: ((model: string) => RoutingPrice | undefined) | undefined;
-  /** Model whose price the savings estimate compares against, e.g. the expert-tier model. */
-  readonly baselineModel?: string | undefined;
+  /** Effective USD per million tokens of a model from the user's own priced usage. */
+  readonly ratePerMillion?: ((model: string) => number | undefined) | undefined;
 }) {
   const resolve = useMessages();
   const gt = useGT();
@@ -80,14 +83,11 @@ function RoutingHistoryPanel({
   const rows = buildRoutingRows({
     providerTurns,
     providerThreads,
-    ...(priceFor === undefined ? {} : { priceFor }),
   });
   if (rows.length === 0) return null;
   const measured = sumMeasuredTokens(rows);
   const savings =
-    priceFor === undefined || baselineModel === undefined
-      ? undefined
-      : estimateSavings({ providerTurns, priceFor, baselinePrice: priceFor(baselineModel) });
+    ratePerMillion === undefined ? undefined : estimateSavings({ providerTurns, ratePerMillion });
   const headers = [
     resolve(msg("Turn")),
     resolve(msg("Provider / model")),
@@ -118,9 +118,10 @@ function RoutingHistoryPanel({
       {savings === undefined ? null : (
         <p className="text-xs text-muted-foreground">
           <T>Estimated API-equivalent cost</T>: {usd.format(savings.actualUsd)} <T>vs</T>{" "}
-          {usd.format(savings.baselineUsd)} <T>on</T> {baselineModel} (
+          {usd.format(savings.baselineUsd)} <T>on</T> {savings.baselineModel} (
           {usd.format(savings.savedUsd)} <T>saved</T>, {savings.pricedTurns}/{savings.totalTurns}{" "}
-          <T>turns priced</T>). <T>Assumes the same tokens; not a bill.</T>
+          <T>turns priced</T>).{" "}
+          <T>Same tokens on the worker model, at your measured average price; not a bill.</T>
         </p>
       )}
       <div

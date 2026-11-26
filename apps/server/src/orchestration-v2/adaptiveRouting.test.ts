@@ -28,7 +28,7 @@ describe("adaptive routing", () => {
     ["Fix the typo in the heading", "work", "low"],
     ["Implement a save button", "work", "medium"],
     ["Debug an intermittent deadlock", "work", "high"],
-    ["Design the authentication architecture", "deep", "high"],
+    ["Design the authentication architecture", "work", "high"],
     ["Review the pending diff", "work", "medium"],
     ["Reply with just OK", "quick", "low"],
     ["thanks, what does this error mean?", "work", "medium"],
@@ -98,8 +98,9 @@ describe("adaptive routing", () => {
     expect(
       classifyAdaptiveTask("is it done?", 0, { tier: "economy", effort: "low" }),
     ).toMatchObject({ tier: "economy" });
+    // Expert comes only from escalation after real failures, never from the wording alone.
     expect(classifyAdaptiveTask("Design the authentication architecture", 0, hard)).toMatchObject({
-      tier: "expert",
+      tier: "worker",
     });
     expect(
       resolveAdaptiveTurn({
@@ -118,7 +119,38 @@ describe("adaptive routing", () => {
         },
         nowMs: 0,
       }),
-    ).toMatchObject({ selection: { model: "deep", options: [{ id: "effort", value: "high" }] } });
+    ).toMatchObject({ selection: { model: "work", options: [{ id: "effort", value: "high" }] } });
+  });
+
+  it("caps follow-ups at worker/high unless failures hold the escalation", () => {
+    const expert = {
+      tier: "expert",
+      effort: "high",
+      reason: "Architecture or security-critical decision",
+    } as const;
+    expect(classifyAdaptiveTask("continue", 0, expert)).toMatchObject({
+      tier: "worker",
+      effort: "high",
+    });
+    expect(classifyAdaptiveTask("continue", 2, expert)).toMatchObject({ tier: "expert" });
+  });
+
+  it("uses the top model only after the expert model failed twice, else stays on expert", () => {
+    const withTop = {
+      ...capabilities,
+      models: [...capabilities.models, { id: "top", tier: "expert", top: true, efforts: ["high"] }],
+    } as const;
+    const pick = (failureCount: number, caps: AdaptiveProviderCapabilities) =>
+      resolveAdaptiveTurn({
+        selection: auto,
+        capabilities: caps,
+        text: "continue",
+        history: { failureCount, tokens: 0 },
+        nowMs: 0,
+      });
+    expect(pick(3, withTop)).toMatchObject({ selection: { model: "deep" } });
+    expect(pick(4, withTop)).toMatchObject({ selection: { model: "top" } });
+    expect(pick(4, capabilities)).toMatchObject({ selection: { model: "deep" } });
   });
 
   it("escalates on a failure streak carried by runtime signals and steps back down", () => {

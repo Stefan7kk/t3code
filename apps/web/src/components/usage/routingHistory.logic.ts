@@ -163,35 +163,46 @@ export interface RoutingSavings {
   readonly actualUsd: number;
   readonly baselineUsd: number;
   readonly savedUsd: number;
+  /** The worker model the same tokens are priced on. */
+  readonly baselineModel: string;
   /** Turns that could be priced; the rest are excluded, never guessed. */
   readonly pricedTurns: number;
   readonly totalTurns: number;
 }
 
 /**
- * ESTIMATE: what the measured tokens would have cost at `baselinePrice` versus the model that ran.
- * Assumes the baseline model would use the same tokens, so callers must label it an estimate.
+ * ESTIMATE: the measured tokens of each routed turn at the model's effective USD per million
+ * tokens (`ratePerMillion`, from the user's own priced usage) versus the same tokens on the
+ * thread's most-used worker model. Assumes the worker model would use the same tokens.
  */
 export function estimateSavings(input: {
   readonly providerTurns: ReadonlyArray<OrchestrationV2ProviderTurn>;
-  readonly priceFor: (model: string) => RoutingPrice | undefined;
-  readonly baselinePrice: RoutingPrice | undefined;
+  readonly ratePerMillion: (model: string) => number | undefined;
 }): RoutingSavings | undefined {
-  if (input.baselinePrice === undefined) return undefined;
   const routed = input.providerTurns.filter((turn) => turn.adaptiveRoute !== undefined);
+  const counts = new Map<string, number>();
+  for (const turn of routed) {
+    const model = turn.model ?? turn.adaptiveRoute?.requestedModel;
+    if (turn.adaptiveRoute?.tier === "worker" && model !== undefined) {
+      counts.set(model, (counts.get(model) ?? 0) + 1);
+    }
+  }
+  const baselineModel = [...counts].toSorted((a, b) => b[1] - a[1])[0]?.[0];
+  const baselineRate =
+    baselineModel === undefined ? undefined : input.ratePerMillion(baselineModel);
+  if (baselineModel === undefined || baselineRate === undefined) return undefined;
   let actualUsd = 0;
   let baselineUsd = 0;
   let pricedTurns = 0;
   for (const turn of routed) {
     const model = turn.model ?? turn.adaptiveRoute?.requestedModel;
-    const actual =
-      model === undefined
-        ? undefined
-        : estimateTurnCostUsd(turn.turnTokenUsage, input.priceFor(model));
-    const baseline = estimateTurnCostUsd(turn.turnTokenUsage, input.baselinePrice);
-    if (actual === undefined || baseline === undefined) continue;
-    actualUsd += actual;
-    baselineUsd += baseline;
+    const rate = model === undefined ? undefined : input.ratePerMillion(model);
+    const usage = turn.turnTokenUsage;
+    if (rate === undefined || usage?.inputTokens === undefined || usage.outputTokens === undefined)
+      continue;
+    const tokens = usage.inputTokens + usage.outputTokens;
+    actualUsd += (tokens * rate) / 1_000_000;
+    baselineUsd += (tokens * baselineRate) / 1_000_000;
     pricedTurns += 1;
   }
   if (pricedTurns === 0) return undefined;
@@ -199,6 +210,7 @@ export function estimateSavings(input: {
     actualUsd,
     baselineUsd,
     savedUsd: baselineUsd - actualUsd,
+    baselineModel,
     pricedTurns,
     totalTurns: routed.length,
   };

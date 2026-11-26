@@ -123,11 +123,12 @@ describe("OpenCode Auto capabilities", () => {
 
   it("routes tasks to a concrete listed model and variant through the shared resolver", () => {
     const capabilities = openCodeAdaptiveCapabilities(instanceId, runtimeModels);
-    const resolve = (text: string, maxTier?: "economy" | "worker" | "expert") =>
+    const resolve = (text: string, maxTier?: "economy" | "worker" | "expert", failureCount = 0) =>
       resolveAdaptiveTurn({
         selection: auto,
         capabilities,
         text,
+        history: { failureCount, tokens: 0 },
         nowMs: 0,
         ...(maxTier === undefined ? {} : { maxTier }),
       });
@@ -140,13 +141,13 @@ describe("OpenCode Auto capabilities", () => {
     expect(resolve("Implement a save button")).toMatchObject({
       selection: { model: "opencode-go/gpt-6-luna", options: [{ id: "variant", value: "medium" }] },
     });
-    expect(resolve("Design the authentication architecture")).toMatchObject({
+    expect(resolve("try again", undefined, 2)).toMatchObject({
       selection: {
         model: "opencode-go/deepseek-v4-pro",
         options: [{ id: "variant", value: "high" }],
       },
     });
-    expect(resolve("Design the authentication architecture", "worker")).toMatchObject({
+    expect(resolve("try again", "worker", 2)).toMatchObject({
       selection: { model: "opencode-go/gpt-6-luna" },
       route: { tier: "worker", reason: expect.stringContaining("capped at worker") },
     });

@@ -130,7 +130,7 @@ export function claudeAdaptiveAgentGuidance(
       ].join(" ");
 }
 
-const families = { haiku: "economy", sonnet: "worker", opus: "expert" } as const;
+const families = { haiku: "economy", sonnet: "worker", opus: "expert", fable: "expert" } as const;
 const effortChoice = {
   id: ADAPTIVE_SELECTION,
   label: "Auto",
@@ -161,7 +161,7 @@ const budgetOptions = [
 ] as const;
 
 function modelFamily(value: string): keyof typeof families | undefined {
-  return (["haiku", "sonnet", "opus"] as const).find((family) =>
+  return (["haiku", "sonnet", "opus", "fable"] as const).find((family) =>
     new RegExp(`(?:^|[./])(?:claude-)?${family}(?:$|-|@)`, "i").test(value),
   );
 }
@@ -187,6 +187,16 @@ export function claudeAdaptiveTurnFailed(
     : undefined;
 }
 
+/**
+ * A piped test run (`node --test | head`) exits 0 even when tests fail, so read the report too.
+ * Matches counted failures ("2 failed", "fail 1") and failure marks, never "0 failed"/"fail 0".
+ */
+export function claudeTestOutputFailed(output: string): boolean {
+  return /\b[1-9]\d* (?:failed|failing|failures?)\b|\bfail [1-9]|✖|\bFAILED\b|AssertionError/.test(
+    output,
+  );
+}
+
 export function claudeAdaptiveCapabilities(
   instanceId: ModelSelection["instanceId"],
   catalog: ClaudeModelCatalog,
@@ -206,6 +216,7 @@ export function claudeAdaptiveCapabilities(
         runtimeId: info.value,
         efforts: info.supportedEffortLevels ?? [],
         ...(family === undefined ? {} : { tier: families[family] }),
+        ...(family === "fable" ? { top: true } : {}),
       },
     ];
   });
@@ -293,7 +304,7 @@ export function claudeAdaptiveAgents(
     prompt: string,
   ) => {
     const model = capabilities.models.find(
-      (model) => model.tier === tier && model.efforts.includes(effort),
+      (model) => model.tier === tier && !model.top && model.efforts.includes(effort),
     );
     if (!model) return;
     agents[name] = {

@@ -6,6 +6,7 @@ import {
   claudeAdaptiveCapabilities,
   claudeAdaptiveDiffTool,
   claudeAdaptiveTurnFailed,
+  claudeTestOutputFailed,
   withClaudeAdaptiveChoices,
 } from "./claudeAdaptiveRouting.ts";
 
@@ -27,6 +28,15 @@ describe("claudeAdaptiveTurnFailed", () => {
     expect(claudeAdaptiveTurnFailed(undefined, [1, 1, 1, 1, 1])).toBe(true);
     expect(claudeAdaptiveTurnFailed(undefined, [2, 2])).toBeUndefined();
     expect(claudeAdaptiveTurnFailed(undefined, [])).toBeUndefined();
+  });
+});
+
+describe("claudeTestOutputFailed", () => {
+  it("reads failures from a piped test report and ignores clean runs", () => {
+    expect(claudeTestOutputFailed("ℹ tests 1\nℹ pass 0\nℹ fail 1")).toBe(true);
+    expect(claudeTestOutputFailed("2 failed, 5 passed")).toBe(true);
+    expect(claudeTestOutputFailed("ℹ tests 3\nℹ pass 3\nℹ fail 0")).toBe(false);
+    expect(claudeTestOutputFailed("")).toBe(false);
   });
 });
 

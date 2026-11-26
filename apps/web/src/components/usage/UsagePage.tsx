@@ -577,7 +577,7 @@ export function UsagePage() {
                 onSelectModel={selectUsageModel}
               />
             )}
-            <LastThreadRoutingHistory />
+            <LastThreadRoutingHistory models={merged.models} />
           </WorkspacePageContainer>
         </ScrollArea>
       </div>

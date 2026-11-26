@@ -57,8 +57,14 @@ const auto: ModelSelection = {
   model: ADAPTIVE_SELECTION,
   options: [{ id: "effort", value: ADAPTIVE_SELECTION }],
 };
-const resolve = (text: string, selection = auto, models = runtimeModels) =>
-  resolveCursorAdaptiveSelection({ selection, models, text, nowMs: 0 });
+const resolve = (text: string, selection = auto, models = runtimeModels, failureCount = 0) =>
+  resolveCursorAdaptiveSelection({
+    selection,
+    models,
+    text,
+    history: { failureCount, tokens: 0 },
+    nowMs: 0,
+  });
 
 describe("Cursor Auto capabilities", () => {
   it("assigns tiers by version-agnostic keywords", () => {
@@ -117,7 +123,7 @@ describe("Cursor Auto capabilities", () => {
         options: [{ id: "reasoning_effort", value: "low" }],
       },
     });
-    expect(resolve("Design the authentication architecture")).toMatchObject({
+    expect(resolve("try again", auto, runtimeModels, 2)).toMatchObject({
       selection: { model: "claude-opus-5", options: [{ id: "effort", value: "high" }] },
       route: { effortOptionId: "effort" },
     });

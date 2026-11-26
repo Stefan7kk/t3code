@@ -17,6 +17,8 @@ export interface AdaptiveProviderCapabilities {
   readonly models: ReadonlyArray<{
     readonly id: string;
     readonly tier?: AdaptiveModelTier;
+    /** Above the expert tier: only used after the expert model failed twice on the same task. */
+    readonly top?: boolean;
     readonly efforts: ReadonlyArray<string>;
     readonly effortByLevel?: Readonly<Partial<Record<Effort, string>>>;
     readonly reportedId?: string;
@@ -64,6 +66,8 @@ export interface AdaptivePreviousRoute {
 
 const CATCH_ALL_REASON = "Implementation or general work";
 const ESCALATED_REASON = "Repeated failure on this task";
+const TOP_REASON = `${ESCALATED_REASON}: the expert model failed twice, using the top model`;
+const WORKER_HIGH = { tier: "worker", effort: "high" } as const;
 const FILE_REFERENCE =
   /[\w./\-]+\.(?:tsx?|jsx?|mjs|py|rs|go|java|cs|cpp|c|h|json|ya?ml|toml|md|css|html|sql|sh|ps1)\b/g;
 const rank = (route: { readonly tier: AdaptiveModelTier; readonly effort: Effort }) =>
@@ -79,7 +83,8 @@ function classifyByRules(
       task,
     )
   ) {
-    return ["expert", "high", "Architecture or security-critical decision"];
+    // The expert model is reached only by escalation after real failures (failureCount >= 2).
+    return ["worker", "high", "Architecture or security-critical decision"];
   }
   if (
     failed ||
@@ -192,14 +197,14 @@ export function classifyAdaptiveTask(
       : continuation || notification || tier === "economy"
         ? priorFailures
         : 0;
+  const top = failureCount >= 4;
   if (failureCount >= 2) {
-    [tier, effort, reason] = ["expert", "high", ESCALATED_REASON];
+    [tier, effort, reason] = ["expert", "high", top ? TOP_REASON : ESCALATED_REASON];
   } else {
     if (followUp) {
-      // An escalation ends with its failure streak; the follow-up drops back to the worker.
-      const running = previous.reason?.startsWith(ESCALATED_REASON)
-        ? ({ tier: "worker", effort: "high" } as const)
-        : previous;
+      // A follow-up inherits at most worker/high; the expert model is kept only while real
+      // failures hold the escalation (failureCount >= 2 above).
+      const running = rank(previous) > rank(WORKER_HIGH) ? WORKER_HIGH : previous;
       if (rank(running) > rank({ tier, effort })) {
         [tier, effort, reason] = [running.tier, running.effort, "Follow-up on the running task"];
       }
@@ -212,7 +217,7 @@ export function classifyAdaptiveTask(
       [tier, effort, reason] = ["worker", "medium", "Problem report"];
     }
   }
-  return { tier, effort, reason, failureCount, unclear };
+  return { tier, effort, reason, failureCount, unclear, top };
 }
 
 function previousAdaptiveRoute(
@@ -314,8 +319,13 @@ export function resolveAdaptiveTurn(input: {
   ) {
     return { error: "The provider reports an exhausted usage or spend limit." };
   }
+  const ofTier = (top: boolean) =>
+    capabilities.models.filter((model) => model.tier === requested.tier && !!model.top === top);
+  // Without a top model on this account the expert model keeps the task.
   const matching = modelAuto
-    ? capabilities.models.filter((model) => model.tier === requested.tier)
+    ? requested.top && ofTier(true).length > 0
+      ? ofTier(true)
+      : ofTier(false)
     : capabilities.models.filter((model) => model.id === selection.model);
   const model = matching.find(
     (candidate) =>

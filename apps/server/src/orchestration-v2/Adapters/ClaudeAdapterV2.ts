@@ -17,6 +17,7 @@ import {
   claudeAdaptiveCapabilities,
   claudeAdaptiveDiffTool,
   claudeAdaptiveTurnFailed,
+  claudeTestOutputFailed,
   claudeAdaptiveReviewServer,
   claudeAdaptiveUsageLimits,
   readClaudeAdaptiveDiff,
@@ -13652,7 +13653,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       (!hook.is_interrupt &&
                         !/denied|permission|rejected|cancelled/i.test(hook.error))
                     ) {
-                      context.adaptiveTestFailed = hook.hook_event_name === "PostToolUseFailure";
+                      const response =
+                        "tool_response" in hook
+                          ? [
+                              typeof hook.tool_response === "string" ? hook.tool_response : "",
+                              field(hook.tool_response, "stdout"),
+                              field(hook.tool_response, "stderr"),
+                              field(hook.tool_response, "output"),
+                            ].join("\n")
+                          : "";
+                      context.adaptiveTestFailed =
+                        hook.hook_event_name === "PostToolUseFailure" ||
+                        claudeTestOutputFailed(response);
                     }
                   }
                 }

@@ -200,17 +200,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         routingUsageLimits: (): Effect.Effect<ServerProvider["usageLimits"]> =>
           snapshot.getSnapshot.pipe(Effect.map((provider) => provider.usageLimits)),
         // Same provider only; a slow or failed pre-check leaves the decision to the rules.
-        routingPrecheck: ({ text, model }) =>
-          (
-            textGeneration.classifyAdaptiveRoute?.({
-              cwd: stateDir,
-              text,
-              modelSelection: { instanceId, model },
-            }) ?? Effect.undefined
-          ).pipe(
-            Effect.timeout("10 seconds"),
-            Effect.orElseSucceed(() => undefined),
-          ),
+        // Off by default (instance setting "Auto pre-check"): it costs a call per unclear request.
+        ...(config.autoPrecheck !== "on"
+          ? {}
+          : {
+              routingPrecheck: ({ text, model }: { text: string; model: string }) =>
+                (
+                  textGeneration.classifyAdaptiveRoute?.({
+                    cwd: stateDir,
+                    text,
+                    modelSelection: { instanceId, model },
+                  }) ?? Effect.undefined
+                ).pipe(
+                  Effect.timeout("10 seconds"),
+                  Effect.orElseSucceed(() => undefined),
+                ),
+            }),
       },
     ).pipe(
       Effect.mapError(

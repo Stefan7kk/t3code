@@ -8368,6 +8368,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ) {
           const model = flavor.resolveModelId?.(modelSelection) ?? modelSelection.model;
           if (
+            // Auto resolves to a real model when each turn starts.
+            usesAdaptiveSelection(modelSelection) ||
             flavor.applyModelSelection !== undefined ||
             model.length === 0 ||
             model === "default" ||
@@ -8409,7 +8411,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               ? new AcpModelSelectionError({ model: modelSelection.model, cause: error })
               : error;
           let appliedModel: string | undefined;
-          if (flavor.applyModelSelection !== undefined) {
+          if (usesAdaptiveSelection(modelSelection)) {
+            // Nothing to apply yet: startTurn configures the model Auto picked.
+          } else if (flavor.applyModelSelection !== undefined) {
             appliedModel = yield* flavor
               .applyModelSelection({
                 runtime,

@@ -61,9 +61,11 @@ const catalog = [
 const turn = (
   text: string,
   selection: Partial<ModelSelection> & { options?: ModelSelection["options"] } = {},
+  failureCount = 0,
 ) =>
   ({
     message: { text },
+    adaptiveHistory: { taskText: text, failureCount, tokens: 0 },
     modelSelection: {
       instanceId,
       model: ADAPTIVE_SELECTION,
@@ -176,7 +178,7 @@ describe("makeQwenAdaptiveResolver", () => {
 
   it.effect("routes architecture work to an expert model with its own effort ceiling", () =>
     Effect.gen(function* () {
-      const decision = yield* resolve(turn("design the architecture for the new sync layer"));
+      const decision = yield* resolve(turn("try again", {}, 2));
       expect(decision).toMatchObject({
         selection: {
           model: "qwen3.8-max(openai)",
@@ -201,12 +203,16 @@ describe("makeQwenAdaptiveResolver", () => {
   it.effect("honors the maximum Auto tier", () =>
     Effect.gen(function* () {
       const decision = yield* resolve(
-        turn("design the architecture for the new sync layer", {
-          options: [
-            { id: "reasoning_effort", value: ADAPTIVE_SELECTION },
-            { id: "autoMaxTier", value: "worker" },
-          ],
-        }),
+        turn(
+          "try again",
+          {
+            options: [
+              { id: "reasoning_effort", value: ADAPTIVE_SELECTION },
+              { id: "autoMaxTier", value: "worker" },
+            ],
+          },
+          2,
+        ),
       );
       expect(decision).toMatchObject({
         route: { tier: "worker", reason: expect.stringContaining("capped at worker") },

@@ -852,6 +852,22 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    autoPrecheck: Schema.Literals(["off", "on"]).pipe(
+      Schema.withDecodingDefault(Effect.succeed("off" as const)),
+      Schema.annotateKey({
+        title: "Auto pre-check",
+        description:
+          "Let the economy model place unclear requests before Auto picks a model. Costs about 3,000 tokens and a few seconds per unclear request. Off by default.",
+        providerSettingsForm: {
+          control: "select",
+          options: [
+            { value: "off", label: "Off" },
+            { value: "on", label: "On" },
+          ],
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
     idleCompaction: InstanceIdleCompaction.pipe(
       Schema.withDecodingDefault(Effect.succeed("default" as const)),
       Schema.annotateKey({
@@ -867,7 +883,14 @@ export const ClaudeSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "idleCompaction", "launchArgs"],
+    order: [
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "idleCompaction",
+      "autoPrecheck",
+      "launchArgs",
+    ],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
