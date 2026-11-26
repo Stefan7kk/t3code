@@ -83,8 +83,17 @@ function classifyByRules(
       task,
     )
   ) {
-    // The expert model is reached only by escalation after real failures (failureCount >= 2).
-    return ["worker", "high", "Architecture or security-critical decision"];
+    return ["expert", "high", "Architecture or security-critical decision"];
+  }
+  // Real building gets the best model from the start; questions about building do not.
+  if (
+    !continuation &&
+    !/^(?:please\s+)?(?:what|how|why|where|which|who|explain|can you explain)\b/i.test(task) &&
+    /\b(?:build|create|develop|implement|scaffold|set up|make)\b[^.\n]{0,60}\b(?:app|application|website|site|dashboard|api|service|backend|frontend|system|platform|tool|bot|pipeline|module|plugin|extension|game|cli|server|database|schema)\b/i.test(
+      task,
+    )
+  ) {
+    return ["expert", "high", "Building a new app, feature or system"];
   }
   if (
     failed ||
@@ -209,8 +218,8 @@ export function classifyAdaptiveTask(
         [tier, effort, reason] = [running.tier, running.effort, "Follow-up on the running task"];
       }
     }
-    if (large && rank({ tier, effort }) < rank({ tier: "worker", effort: "high" })) {
-      [tier, effort, reason] = ["worker", "high", "Large or multi-file request"];
+    if (large && rank({ tier, effort }) < rank({ tier: "expert", effort: "high" })) {
+      [tier, effort, reason] = ["expert", "high", "Large or multi-file request"];
     }
     // Safety floor: a problem report never goes to the economy model.
     if (tier === "economy" && /\b(?:errors?|crash\w*|bugs?|why|broken|fail\w*)\b/i.test(task)) {
