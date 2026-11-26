@@ -908,6 +908,15 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       if (!usesAdaptiveSelection(selection)) return { selection };
       yield* readModelsOnce(cwd);
       const directory = directoryOf(cwd);
+      // A fresh server lists no models (or times out) for its first moments: read again, briefly.
+      for (
+        let attempt = 0;
+        attempt < 6 && [...modelVariants.values()].every((variants) => variants.size === 0);
+        attempt++
+      ) {
+        yield* Effect.sleep("500 millis");
+        yield* readModels(directory);
+      }
       const tierOption = getModelSelectionStringOptionValue(selection, "autoMaxTier");
       const budget = Number(getModelSelectionStringOptionValue(selection, "autoTokenBudget"));
       const usageLimits = yield* connection.usageLimits(directory);
