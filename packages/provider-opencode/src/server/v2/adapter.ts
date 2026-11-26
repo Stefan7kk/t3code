@@ -916,7 +916,13 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         capabilities: {
           ...openCodeAdaptiveCapabilities(
             instanceId,
-            openCodeModelsFromVariants(modelVariants.get(directory) ?? new Map()),
+            openCodeModelsFromVariants(
+              // A directory the server has just started lists no models yet; the catalog is the same
+              // everywhere, so borrow the list of one that has it.
+              [directory, ...modelVariants.keys()]
+                .map((key) => modelVariants.get(key))
+                .find((variants) => variants !== undefined && variants.size > 0) ?? new Map(),
+            ),
           ),
           ...(usageLimits ? { usageLimits } : {}),
         },
