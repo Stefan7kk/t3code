@@ -4147,11 +4147,6 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         const variants = modelVariants.get(directory) ?? new Map<string, ReadonlySet<string>>();
         modelVariants.set(directory, variants);
         return client.model.list({ location: { directory } }).pipe(
-          // A fresh server lists no models for its first moments; Auto needs the real list.
-          Effect.repeat({
-            until: (models) => models.data.length > 0,
-            schedule: Schedule.spaced("250 millis"),
-          }),
           Effect.timeout("5 seconds"),
           Effect.tap((models) =>
             Effect.sync(() => {
@@ -4166,9 +4161,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         );
       });
     const readModelsOnce = (cwd: string | null | undefined) =>
-      (modelVariants.get(directoryOf(cwd))?.size ?? 0) > 0
-        ? Effect.void
-        : readModels(directoryOf(cwd));
+      contextWindows.has(directoryOf(cwd)) ? Effect.void : readModels(directoryOf(cwd));
     yield* readModels(session.cwd);
 
     const agentRules = new Map<string, ReadonlyMap<string, ReadonlyArray<Rule>>>();
