@@ -148,7 +148,7 @@ describe("Cursor Auto capabilities", () => {
         model: "composer-2.5",
         options: [{ id: "effort", value: ADAPTIVE_SELECTION }],
       }),
-    ).toHaveProperty("error");
+    ).toMatchObject({ selection: { model: "composer-2.5", options: [] } });
   });
 
   it("honors the tier cap and de-escalates near a limit", () => {

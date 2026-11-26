@@ -319,28 +319,52 @@ export function resolveAdaptiveTurn(input: {
   ) {
     return { error: "The provider reports an exhausted usage or spend limit." };
   }
-  const ofTier = (top: boolean) =>
-    capabilities.models.filter((model) => model.tier === requested.tier && !!model.top === top);
-  // Without a top model on this account the expert model keeps the task.
-  const matching = modelAuto
-    ? requested.top && ofTier(true).length > 0
-      ? ofTier(true)
-      : ofTier(false)
-    : capabilities.models.filter((model) => model.id === selection.model);
-  const model = matching.find(
-    (candidate) =>
-      (!effortAuto || candidate.efforts.length > 0) &&
-      (typeof requestedEffort !== "string" ||
-        effortAuto ||
-        requestedEffort === "default" ||
-        candidate.efforts.includes(requestedEffort)) &&
-      !windows.some(
-        (window) =>
-          window.usedPercent >= 100 &&
-          (window.modelIds?.includes(candidate.id) ||
-            window.modelIds?.includes(candidate.reportedId ?? "")),
-      ),
-  );
+  const usable = (candidate: AdaptiveProviderCapabilities["models"][number]) =>
+    (typeof requestedEffort !== "string" ||
+      effortAuto ||
+      requestedEffort === "default" ||
+      candidate.efforts.includes(requestedEffort)) &&
+    !windows.some(
+      (window) =>
+        window.usedPercent >= 100 &&
+        (window.modelIds?.includes(candidate.id) ||
+          window.modelIds?.includes(candidate.reportedId ?? "")),
+    );
+  // A model whose reasoning levels are known is preferred, but unknown levels never block a model.
+  const pick = (list: AdaptiveProviderCapabilities["models"]) =>
+    list
+      .filter(usable)
+      .toSorted((a, b) => Number(b.efforts.length > 0) - Number(a.efforts.length > 0))[0];
+  const ofTier = (tier: AdaptiveModelTier, top: boolean) =>
+    capabilities.models.filter((model) => model.tier === tier && !!model.top === top);
+  const wantedRank = tiers.indexOf(requested.tier);
+  const capRank = input.maxTier === undefined ? tiers.length - 1 : tiers.indexOf(input.maxTier);
+  let routedTier = requested.tier;
+  let model: AdaptiveProviderCapabilities["models"][number] | undefined;
+  if (modelAuto) {
+    // Without a top model on this account the expert model keeps the task.
+    model =
+      (requested.top ? pick(ofTier(requested.tier, true)) : undefined) ??
+      pick(ofTier(requested.tier, false));
+    // Provider model names do not always reveal a cheap tier: use the nearest tier that has a model,
+    // upward first (never past the cap), then downward.
+    const nearer = [
+      ...tiers.filter((_, index) => index > wantedRank && index <= capRank),
+      ...tiers.filter((_, index) => index < wantedRank).toReversed(),
+    ];
+    // Only when the provider has no model of the wanted tier at all; a model that exists but cannot
+    // honor the requested effort or limits must never push the task to a pricier tier.
+    const hasWantedTier = capabilities.models.some(
+      (candidate) => candidate.tier === requested.tier,
+    );
+    for (const tier of hasWantedTier ? [] : nearer) {
+      if (model !== undefined) break;
+      model = pick(ofTier(tier, false));
+      routedTier = tier;
+    }
+  } else {
+    model = pick(capabilities.models.filter((candidate) => candidate.id === selection.model));
+  }
   if (model === undefined) {
     return {
       error: modelAuto
@@ -372,7 +396,7 @@ export function resolveAdaptiveTurn(input: {
     : typeof requestedEffort === "string" && requestedEffort !== "default"
       ? requestedEffort
       : undefined;
-  if (effortAuto && effort === undefined)
+  if (effortAuto && effort === undefined && model.efforts.length > 0)
     return { error: "No supported effort fits this Auto route. Choose an effort manually." };
   const modelEffortOptionId = model.effortOptionId ?? capabilities.effortOptionId;
   const options = selection.options?.filter(({ id }) => !effortOptionIds.includes(id)) ?? [];
@@ -381,10 +405,14 @@ export function resolveAdaptiveTurn(input: {
     selection: { ...selection, model: model.id, options },
     route: {
       ...(model.tier === undefined ? {} : { tier: model.tier }),
-      reason:
-        preferredEffort !== requested.effort
-          ? `${requested.reason}. Effort reduced near a subscription limit`
-          : requested.reason,
+      reason: [
+        routedTier === requested.tier
+          ? requested.reason
+          : `${requested.reason} (no ${requested.tier} model available, used ${routedTier})`,
+        ...(preferredEffort !== requested.effort
+          ? ["Effort reduced near a subscription limit"]
+          : []),
+      ].join(". "),
       requestedModel: model.reportedId ?? model.id,
       ...(effort === undefined
         ? {}

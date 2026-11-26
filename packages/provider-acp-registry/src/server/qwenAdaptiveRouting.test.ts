@@ -229,11 +229,14 @@ describe("makeQwenAdaptiveResolver", () => {
     }),
   );
 
-  it.effect("reports when no model can serve the requested tier", () =>
+  it.effect("uses the nearest tier that has a model when the wanted tier has none", () =>
     Effect.gen(function* () {
       expect(
         yield* resolve(turn("find the router"), undefined, [model("glm-5.3(openai)", [])]),
-      ).toMatchObject({ error: expect.stringContaining("No available economy model") });
+      ).toMatchObject({
+        selection: { model: "glm-5.3(openai)" },
+        route: { tier: "worker", reason: expect.stringContaining("no economy model available") },
+      });
     }),
   );
 });

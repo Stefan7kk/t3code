@@ -122,6 +122,26 @@ describe("adaptive routing", () => {
     ).toMatchObject({ selection: { model: "work", options: [{ id: "effort", value: "high" }] } });
   });
 
+  it("uses the nearest tier with a model when the provider has no cheap one, never past the cap", () => {
+    const noCheap: AdaptiveProviderCapabilities = {
+      ...capabilities,
+      models: capabilities.models.filter((model) => model.tier !== "economy"),
+    };
+    const resolve = (maxTier?: "economy" | "worker" | "expert") =>
+      resolveAdaptiveTurn({
+        selection: auto,
+        capabilities: noCheap,
+        text: "Reply with exactly one word: OK",
+        nowMs: 0,
+        ...(maxTier === undefined ? {} : { maxTier }),
+      });
+    expect(resolve()).toMatchObject({
+      selection: { model: "work" },
+      route: { tier: "worker", reason: expect.stringContaining("no economy model available") },
+    });
+    expect(resolve("economy")).toHaveProperty("error");
+  });
+
   it("caps follow-ups at worker/high unless failures hold the escalation", () => {
     const expert = {
       tier: "expert",
