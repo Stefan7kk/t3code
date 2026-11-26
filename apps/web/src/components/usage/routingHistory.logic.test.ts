@@ -12,6 +12,7 @@ import {
   estimateTurnCostUsd,
   lastVisitedThreadRef,
   sumMeasuredTokens,
+  summarizeRouteQuality,
   type RoutingPrice,
 } from "./routingHistory.logic";
 
@@ -197,5 +198,27 @@ describe("lastVisitedThreadRef", () => {
       ]),
     ).toEqual(ref("new"));
     expect(lastVisitedThreadRef([{ ref: ref("never"), lastVisitedAt: null }])).toBeNull();
+  });
+});
+
+describe("summarizeRouteQuality", () => {
+  const routed = (ordinal: number, tier: string, failureCount: number) =>
+    turn(ordinal, {
+      status: "completed",
+      adaptiveRoute: { reason: "x", requestedModel: "m", tier, failureCount },
+    });
+
+  it("counts a failed lower tier that a stronger tier then solved as sent too low", () => {
+    const quality = summarizeRouteQuality([
+      routed(1, "worker", 1),
+      routed(2, "expert", 0),
+      routed(3, "worker", 0),
+    ]);
+    expect(quality).toMatchObject({ routedTurns: 3, tooLow: 1, tooHigh: 0 });
+    expect(quality?.rightShare).toBeCloseTo(2 / 3);
+  });
+
+  it("is undefined without routed turns", () => {
+    expect(summarizeRouteQuality([turn(1, { adaptiveRoute: undefined })])).toBeUndefined();
   });
 });

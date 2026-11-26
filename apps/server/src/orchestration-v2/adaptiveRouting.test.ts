@@ -28,16 +28,16 @@ describe("adaptive routing", () => {
     ["Fix the typo in the heading", "work", "low"],
     ["Implement a save button", "work", "medium"],
     ["Debug an intermittent deadlock", "work", "high"],
-    ["Design the authentication architecture", "deep", "high"],
+    ["Design the authentication architecture", "work", "high"],
     ["Review the pending diff", "work", "medium"],
     ["Reply with just OK", "quick", "low"],
     ["thanks, what does this error mean?", "work", "medium"],
     ["why is it so slow", "work", "medium"],
     ["Is the build broken?", "work", "medium"],
     ["It works, but why does it crash on exit?", "work", "medium"],
-    [`Implement the importer. ${"Handle every listed case. ".repeat(70)}`, "deep", "high"],
-    ["Update a.ts, b.ts, c.tsx, d.py and e.json to the new name", "deep", "high"],
-    ["Build a new dashboard app with login", "deep", "high"],
+    [`Implement the importer. ${"Handle every listed case. ".repeat(70)}`, "work", "high"],
+    ["Update a.ts, b.ts, c.tsx, d.py and e.json to the new name", "work", "high"],
+    ["Build a new dashboard app with login", "work", "high"],
     ["How do I build an app like this?", "work", "medium"],
     ["Design an LRU cache with O(1) get and put", "work", "high"],
     ["Add a dark mode toggle to settings", "work", "medium"],
@@ -100,9 +100,9 @@ describe("adaptive routing", () => {
     expect(
       classifyAdaptiveTask("is it done?", 0, { tier: "economy", effort: "low" }),
     ).toMatchObject({ tier: "economy" });
-    // A fresh architecture or build request starts on the expert model; short follow-ups do not.
+    // Expert comes only from escalation after real failures, never from the wording alone.
     expect(classifyAdaptiveTask("Design the authentication architecture", 0, hard)).toMatchObject({
-      tier: "expert",
+      tier: "worker",
     });
     expect(
       resolveAdaptiveTurn({

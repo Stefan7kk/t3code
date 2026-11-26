@@ -18,6 +18,7 @@ import {
   estimateSavings,
   lastVisitedThreadRef,
   sumMeasuredTokens,
+  summarizeRouteQuality,
   type RoutingEvent,
 } from "./routingHistory.logic";
 
@@ -86,6 +87,7 @@ function RoutingHistoryPanel({
   });
   if (rows.length === 0) return null;
   const measured = sumMeasuredTokens(rows);
+  const quality = summarizeRouteQuality(providerTurns);
   const savings =
     ratePerMillion === undefined ? undefined : estimateSavings({ providerTurns, ratePerMillion });
   const headers = [
@@ -115,6 +117,14 @@ function RoutingHistoryPanel({
           : ""}
         )
       </p>
+      {quality === undefined ? null : (
+        <p className="text-xs text-muted-foreground">
+          <T>Route quality</T>: {Math.round(quality.rightShare * 100)}%{" "}
+          <T>of routed turns showed no sign of a wrong route</T> ({quality.tooLow}{" "}
+          <T>sent too low</T>, {quality.tooHigh} <T>too high</T>).{" "}
+          <T>Judged only from failures, escalations and output size, never from your wording.</T>
+        </p>
+      )}
       {savings === undefined ? null : (
         <p className="text-xs text-muted-foreground">
           <T>Estimated API-equivalent cost</T>: {usd.format(savings.actualUsd)} <T>vs</T>{" "}

@@ -27,6 +27,10 @@
       "types": "./src/server/delegationGuard.ts",
       "import": "./src/server/delegationGuard.ts"
     },
+    "./server/adaptiveOutcomes": {
+      "types": "./src/server/adaptiveOutcomes.ts",
+      "import": "./src/server/adaptiveOutcomes.ts"
+    },
     "./server/adaptiveRouting": {
       "types": "./src/server/adaptiveRouting.ts",
       "import": "./src/server/adaptiveRouting.ts"

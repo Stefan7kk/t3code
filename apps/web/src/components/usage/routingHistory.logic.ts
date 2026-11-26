@@ -4,6 +4,7 @@ import type {
   OrchestrationV2ProviderTurn,
   ScopedThreadRef,
 } from "@t3tools/contracts";
+import { classifyAdaptiveOutcomes } from "@t3tools/provider-core/server/adaptiveOutcomes";
 import * as DateTime from "effect/DateTime";
 
 /** The thread opened most recently, or null when none carries a visit mark. */
@@ -213,5 +214,40 @@ export function estimateSavings(input: {
     baselineModel,
     pricedTurns,
     totalTurns: routed.length,
+  };
+}
+
+export interface RouteQuality {
+  readonly routedTurns: number;
+  /** Turns whose tier failed and a stronger tier then finished cleanly. */
+  readonly tooLow: number;
+  /** Short high-effort turns that needed none of that effort. */
+  readonly tooHigh: number;
+  /** Share of routed turns with no objective sign of a wrong route, 0..1. */
+  readonly rightShare: number;
+}
+
+/** Objective outcomes only (failures, escalations, output size); the user's wording is never read. */
+export function summarizeRouteQuality(
+  providerTurns: ReadonlyArray<OrchestrationV2ProviderTurn>,
+): RouteQuality | undefined {
+  const routed = providerTurns
+    .filter((turn) => turn.adaptiveRoute?.tier !== undefined)
+    .toSorted((a, b) => a.ordinal - b.ordinal);
+  if (routed.length === 0) return undefined;
+  const { tooLow, tooHigh } = classifyAdaptiveOutcomes(
+    routed.map((turn) => ({
+      tier: turn.adaptiveRoute?.tier ?? "worker",
+      effort: turn.adaptiveRoute?.requestedEffort,
+      failureCount: turn.adaptiveRoute?.failureCount ?? 0,
+      completed: turn.status === "completed",
+      outputTokens: turn.turnTokenUsage?.outputTokens,
+    })),
+  );
+  return {
+    routedTurns: routed.length,
+    tooLow: tooLow.length,
+    tooHigh: tooHigh.length,
+    rightShare: (routed.length - tooLow.length - tooHigh.length) / routed.length,
   };
 }
