@@ -392,6 +392,8 @@ import {
   ServerSelfUpdateResult,
   ServerTraceDiagnosticsResult,
   ServerProcessDiagnosticsResult,
+  ServerClaudeToolsResult,
+  ServerSetClaudeToolEnabledInput,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
   ServerSignalProcessInput,
@@ -626,6 +628,8 @@ export const WS_METHODS = {
   serverLogoutAcpRegistry: "server.logoutAcpRegistry",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
+  serverGetClaudeTools: "server.getClaudeTools",
+  serverSetClaudeToolEnabled: "server.setClaudeToolEnabled",
   serverGetHostResources: "server.getHostResources",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverGetResourceTelemetryHistory: "server.getResourceTelemetryHistory",
@@ -1128,6 +1132,18 @@ const WsServerGetTraceDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetTraceDiagnos
 const WsServerGetProcessDiagnosticsRpc = Rpc.make(WS_METHODS.serverGetProcessDiagnostics, {
   payload: Schema.Struct({}),
   success: ServerProcessDiagnosticsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerGetClaudeToolsRpc = Rpc.make(WS_METHODS.serverGetClaudeTools, {
+  payload: Schema.Struct({}),
+  success: ServerClaudeToolsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsServerSetClaudeToolEnabledRpc = Rpc.make(WS_METHODS.serverSetClaudeToolEnabled, {
+  payload: ServerSetClaudeToolEnabledInput,
+  success: ServerClaudeToolsResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2547,6 +2563,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerLogoutAcpRegistryRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,
+  WsServerGetClaudeToolsRpc,
+  WsServerSetClaudeToolEnabledRpc,
   WsServerGetHostResourcesRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerGetResourceTelemetryHistoryRpc,

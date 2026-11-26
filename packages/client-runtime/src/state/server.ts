@@ -1634,6 +1634,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-diagnostics",
       tag: WS_METHODS.serverGetProcessDiagnostics,
     }),
+    claudeTools: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:claude-tools",
+      tag: WS_METHODS.serverGetClaudeTools,
+    }),
     hostResources: createEnvironmentQueryAtomFamily(runtime, {
       label: "environment-data:server:host-resources",
       idleTtlMs: 0,
@@ -1949,6 +1953,10 @@ export function createServerEnvironmentAtoms<R, E>(
         mode: "singleFlight",
         key: ({ environmentId, input }) => `${environmentId}:${input.instanceId}`,
       },
+    }),
+    setClaudeToolEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-claude-tool-enabled",
+      tag: WS_METHODS.serverSetClaudeToolEnabled,
     }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",

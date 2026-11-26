@@ -547,6 +547,29 @@ export const ServerProcessDiagnosticsResult = Schema.Struct({
 });
 export type ServerProcessDiagnosticsResult = typeof ServerProcessDiagnosticsResult.Type;
 
+export const ServerClaudeToolKind = Schema.Literals(["plugin", "mcp", "hook", "skill"]);
+export type ServerClaudeToolKind = typeof ServerClaudeToolKind.Type;
+
+export const ServerClaudeTool = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  kind: ServerClaudeToolKind,
+  enabled: Schema.Boolean,
+  detail: Schema.String,
+});
+export type ServerClaudeTool = typeof ServerClaudeTool.Type;
+
+export const ServerClaudeToolsResult = Schema.Struct({
+  tools: Schema.Array(ServerClaudeTool),
+});
+export type ServerClaudeToolsResult = typeof ServerClaudeToolsResult.Type;
+
+export const ServerSetClaudeToolEnabledInput = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  enabled: Schema.Boolean,
+});
+export type ServerSetClaudeToolEnabledInput = typeof ServerSetClaudeToolEnabledInput.Type;
+
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,

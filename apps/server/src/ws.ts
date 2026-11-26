@@ -259,6 +259,7 @@ import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAut
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
+import { listClaudeTools, setClaudeToolEnabled } from "./claudeTools/ClaudeTools.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
@@ -2871,6 +2872,10 @@ export const layerWsRpc = (
             maxFiles: config.traceMaxFiles,
           }),
         [WS_METHODS.serverGetProcessDiagnostics]: (_input) => processDiagnostics.read,
+        [WS_METHODS.serverGetClaudeTools]: (_input) =>
+          Effect.sync(() => ({ tools: listClaudeTools() })),
+        [WS_METHODS.serverSetClaudeToolEnabled]: (input) =>
+          Effect.sync(() => ({ tools: setClaudeToolEnabled(input.id, input.enabled) })),
         [WS_METHODS.serverGetHostResources]: (_input) => hostResources.read,
         [WS_METHODS.serverGetProcessResourceHistory]: (input) =>
           processResourceMonitor.readHistory(input),
