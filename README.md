@@ -8,6 +8,16 @@
 
 <p align="center">The open-source control plane for coding agents.</p>
 
+<p align="center"><strong>Enhanced fork with Auto model and effort routing.</strong> Not an official T3 release; builds are unsigned.</p>
+
+<p align="center">
+  <a href="https://github.com/Stefan7kk/t3code/releases/latest"><img src="https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white" alt="Download for Windows" /></a>
+  <a href="https://github.com/Stefan7kk/t3code/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20(Apple%20Silicon%20%26%20Intel)-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>
+  <a href="https://github.com/Stefan7kk/t3code/releases/latest"><img src="https://img.shields.io/github/v/release/Stefan7kk/t3code?style=for-the-badge&label=latest" alt="Latest release" /></a>
+</p>
+
+<p align="center"><sub>macOS: open the <code>.dmg</code>, drag the app to Applications, then right-click it and choose <b>Open</b> the first time. Apple Silicon (M1 to M4) uses the <code>arm64</code> file.</sub></p>
+
 <p align="center">
   <a href="https://t3.codes/download"><strong>Download</strong></a> ·
   <a href="https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824">iOS</a> ·
