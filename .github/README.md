@@ -6,9 +6,16 @@
 
 <p align="center">
   <a href="https://github.com/Stefan7kk/t3code/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Stefan7kk/t3code?label=download&color=c2593b"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-555">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-555">
   <a href="../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-555"></a>
 </p>
+
+<p align="center">
+  <a href="https://github.com/Stefan7kk/t3code/releases/latest"><img src="https://img.shields.io/badge/Download%20for-Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/Stefan7kk/t3code/releases/latest"><img src="https://img.shields.io/badge/Download%20for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS"></a>
+</p>
+
+<p align="center"><sub>macOS: pick the <code>arm64</code> .dmg for Apple Silicon (M1 to M4) or <code>x64</code> for Intel. The app is unsigned, so right-click it and choose <b>Open</b> the first time.</sub></p>
 
 <p align="center">
   <a href="https://github.com/Stefan7kk/t3code/releases/latest">
