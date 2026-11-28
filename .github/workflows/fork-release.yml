@@ -612,7 +612,7 @@ jobs:
     name: Build macOS ${{ matrix.arch }} (unsigned)
     needs: [detect, build-publish]
     if: needs.detect.outputs.should_release == 'true'
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 90
     permissions:
       contents: write
