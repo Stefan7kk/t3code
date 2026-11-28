@@ -605,6 +605,90 @@ jobs:
             release/*.blockmap \
             release/SHA256SUMS
 
+  # macOS builds need a Mac host (sips, iconutil, dmg tools). They run after the Windows release is
+  # published and attach to it, so a Mac failure never blocks the Windows update.
+  # shortcut: unsigned and not notarized (no Apple account), no auto-update; upgrade with Apple secrets.
+  build-mac:
+    name: Build macOS ${{ matrix.arch }} (unsigned)
+    needs: [detect, build-publish]
+    if: needs.detect.outputs.should_release == 'true'
+    runs-on: macos-14
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            rust_target: aarch64-apple-darwin
+          - arch: x64
+            rust_target: x86_64-apple-darwin
+    steps:
+      - name: Checkout the released tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git init --initial-branch=main .
+          git remote add origin "https://github.com/${REPO}.git"
+          git fetch --no-tags --depth=1 origin "+refs/tags/v${VERSION}:refs/tags/v${VERSION}"
+          git checkout --force "v${VERSION}"
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --frozen-lockfile
+
+      - name: Ensure Rosetta for x64 bytecode generation
+        if: matrix.arch == 'x64'
+        run: /usr/bin/arch -x86_64 /usr/bin/true || sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.detect.outputs.version }}"
+
+      - name: Build JS bundle
+        env:
+          T3CODE_TELEMETRY_CHANNEL: dev
+        run: vp run build:desktop:bundle
+
+      - name: Apply web client branding
+        run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
+
+      - name: Enable T3 Connect public configuration
+        run: cp .env.example .env
+
+      - name: Build macOS DMG
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          node scripts/build-desktop-artifact.ts \
+            --platform mac --target dmg --arch "${{ matrix.arch }}" \
+            --build-version "$VERSION" \
+            --skip-build --verbose \
+            --output-dir release
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -la release
+          dmg="$(ls release/*.dmg | head -n 1)"
+          test -f "$dmg"
+          shasum -a 256 "$dmg" > "$dmg.sha256"
+          gh release upload "v${VERSION}" "$dmg" "$dmg.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+
   notify-failure:
     name: Report pipeline failure
     needs: [detect, checks, tests, gate, cli-archive, build-publish]
